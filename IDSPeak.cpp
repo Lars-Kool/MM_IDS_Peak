@@ -468,6 +468,7 @@ int CIDSPeak::SnapImage()
     unsigned int pendingFrames = framesToAcquire;
     unsigned int timeoutCount = 0;
 
+    nRet = framerateSet(exposureCur_);
     uint32_t three_frame_times_timeout_ms = (uint32_t)((3000.0 / framerateCur_) + 0.5);
 
     status = peak_Acquisition_Start(hCam, framesToAcquire);
@@ -1006,30 +1007,10 @@ int CIDSPeak::StartSequenceAcquisition(long numImages, double interval_ms, bool 
     {
         return DEVICE_CAMERA_BUSY_ACQUIRING;
     }
-
-    // Make sure interval is less than exposure time
-    // Half a millisecond buffer to make sure sensor can dump info
-    if (interval_ms < exposureCur_ + 0.5)
-    {
-        interval_ms = exposureCur_ + 0.5;
-    }
-
-    // Check if interval doesn't exceed framerate limitations of camera
-    // Else set interval to match max/min framerate
-    if (1000 / interval_ms > framerateMax_)
-    {
-        interval_ms = 1000 / framerateMax_;
-    }
-    else if (1000 / interval_ms < framerateMin_)
-    {
-        interval_ms = 1000 / framerateMin_;
-    }
-
-    int nRet = SetProperty("Interval", CDeviceUtils::ConvertToString(interval_ms));
+    int nRet = DEVICE_OK;
 
     // Adjust framerate to match requested interval between frames
-    status = peak_FrameRate_Set(hCam, 1000 / interval_ms);
-    framerateCur_ = 1000 / interval_ms;
+    nRet = framerateSet(interval_ms);
 
     // Wait until shutter is ready
     nRet = GetCoreCallback()->PrepareForAcq(this);
@@ -1961,4 +1942,30 @@ int CIDSPeak::updateAutoWhiteBalance()
 
     if (status == PEAK_STATUS_SUCCESS) { return DEVICE_OK; }
     else { return DEVICE_ERR; }
+}
+
+int CIDSPeak::framerateSet(double interval_ms)
+{
+    int nRet = DEVICE_OK;
+    // Make sure interval is less than exposure time
+    // Half a millisecond buffer to make sure sensor can dump info
+    if (interval_ms < exposureCur_ + 0.5)
+    {
+        interval_ms = exposureCur_ + 0.5;
+    }
+
+    // Check if interval doesn't exceed framerate limitations of camera
+    // Else set interval to match max framerate
+    if (1000 / interval_ms > framerateMax_)
+    {
+        interval_ms = 1000 / framerateMax_;
+    }
+
+    status = peak_FrameRate_Set(hCam, 1000 / interval_ms);
+    framerateCur_ = 1000 / interval_ms;
+    if (status != DEVICE_OK)
+    {
+        return ERR_NO_WRITE_ACCESS;
+    }
+    return nRet;
 }

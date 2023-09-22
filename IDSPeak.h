@@ -189,6 +189,7 @@ public:
     peak_status getPixelTypes(vector<string>& pixelTypeValues);
     int transferBuffer(peak_frame_handle hFrame, ImgBuffer& img);
     int updateAutoWhiteBalance();
+    int framerateSet(double interval_ms);
 
 
 private:
