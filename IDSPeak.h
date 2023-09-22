@@ -23,7 +23,7 @@
 //                of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 //
 //                IN NO EVENT SHALL THE COPYRIGHT OWNER OR
-//                CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+//                CONTRIBUTORS BE   LIABLE FOR ANY DIRECT, INDIRECT,
 //                INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES.
 //
 //LAST UPDATE:    21.09.2023 LK
@@ -160,7 +160,6 @@ public:
     int OnMaxExposure(MM::PropertyBase* pProp, MM::ActionType eAct);
     int OnBinning(MM::PropertyBase* pProp, MM::ActionType eAct);
     int OnPixelType(MM::PropertyBase* pProp, MM::ActionType eAct);
-    int OnBitDepth(MM::PropertyBase* pProp, MM::ActionType eAct);
     int OnReadoutTime(MM::PropertyBase* pProp, MM::ActionType eAct);
     int OnCameraCCDXSize(MM::PropertyBase*, MM::ActionType);
     int OnCameraCCDYSize(MM::PropertyBase*, MM::ActionType);
@@ -169,7 +168,6 @@ public:
     int OnMultiROIFillValue(MM::PropertyBase* pProp, MM::ActionType eAct);
     int OnCCDTemp(MM::PropertyBase* pProp, MM::ActionType eAct);
     int OnIsSequenceable(MM::PropertyBase* pProp, MM::ActionType eAct);
-    int OnFramerate(MM::PropertyBase* pProp, MM::ActionType eAct);
     int OnAutoWhiteBalance(MM::PropertyBase* pProp, MM::ActionType eAct);
     int OnGainMaster(MM::PropertyBase* pProp, MM::ActionType eAct);
     int OnGainRed(MM::PropertyBase* pProp, MM::ActionType eAct);
@@ -187,10 +185,10 @@ public:
     peak_status getGFAInt(const char* featureName, int64_t* intValue);
     peak_status getGFAfloat(const char* featureName, double* floatValue);
     peak_status getTemperature(double* sensorTemp);
-    void initializePixelTypeConv();
     void initializeAutoWBConversion();
     peak_status getPixelTypes(vector<string>& pixelTypeValues);
-    int transfer_buffer(peak_frame_handle hFrame, ImgBuffer& img);
+    int transferBuffer(peak_frame_handle hFrame, ImgBuffer& img);
+    int updateAutoWhiteBalance();
 
 
 private:

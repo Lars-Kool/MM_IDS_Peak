@@ -1,7 +1,7 @@
 # Micro-Manager Device Adapter for IDS Peak cameras
 Micro-Manager is an application to control microscope hardware, such as cameras. It includes a hardware abstraction layer written in C++ and a user interface written in Java. Micro-Manager needs a translation layer between the driver (written by the manufacturer) and Micro-Manager's C++ backend. This translation layer is called a "Device Adapter" (Micro-Manager has chosen not to call it a "Driver" to distinguish it from the libraries provided by the manufacturers of the devices).
 
-This GitHub repository contains a Device Adapter for IDS cameras. It contains both the already built .dll (mmgr_dal_IDSPeak.dll) and the C++/h files to build it yourself. Instructions can be found below. The Device Adapter was tested with an IDS USB3-3040CP-HQ Rev 2.2, and not with any other camera. Although this should not matter, there might be assumed default settings that might not be universally present.
+This GitHub repository contains a Device Adapter for IDS cameras. It contains both the already built .dll (mmgr_dal_IDSPeak.dll) and the C++/h files to build it yourself. Instructions can be found below. The Device Adapter was tested with an IDS USB3-3040CP-HQ Rev 2.2 on Windows 10, and not with any other camera or operating system. Although camera model should not matter, there might be assumed default settings that might not be universally present. A different operating system could be more problematic. 
 
 ## Using the precompiled .dll
 The following steps will guide you through the process of "installing" the .dll, allowing you to use IDS cameras with Micro-Manager.
@@ -27,12 +27,15 @@ More advanced users could build the device adapter themselves, allowing them to 
   - This is indeed true, the problem is that the camera doesn't support recording BGRA8, which is the only accepted color format of Micro-Manager. Hence, the image has to be recorded in a different pixel format (in this case Bayer RG8) and then converted to BGRA8 on the fly. The maximum obtainable framerate then depends heavily on the (single core) processing speed of your PC. A potential solution is to not do the conversion (just pass the raw bayer data) and perform the debayering after all data is collected.
 - **The minimum interval during the Multi-Dimensional Acquisition (MDA) is approximately 200 ms, even at low exposure times (e.g. 10 ms)**
   - I have no idea what functions are called by the MDA, and am thus not able to determine the rate limiting step. I will have to contact the developers of Micro-Manager to deepen my understanding of the MDA to be able to determine if we can improve this, and if so how.
+- **Changing a value (such as the exposure time) should change another value in the Device Property Browser (like the maximum framerate), but it doesn't update.**
+  - The Device Property Browser only updates when it is opened, try closing and re-opening the Device Property Browser.
 
 ## Future features
-Better implementation of IDS auto white balance
-More support for other pixel types (10/12 bit grayscale/color)
-Recording Bayer / Packed images in RAW format (to post-process afterwards)
-Give more meaningful error messages
+- More support for other pixel types (10/12 bit grayscale/color)
+- Recording Bayer / Packed images in RAW format (to post-process afterwards)
+- Give more meaningful error messages
+
+Other suggestions are more than welcome, either create a github issue or send an email to lars.kool@espci.fr
 
 ## Acknowledgements
 This Device Adapter was developed by Lars Kool at Institut Pierre-Gilles de Gennes (Paris, France).

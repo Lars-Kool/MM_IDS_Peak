@@ -285,22 +285,21 @@ int CIDSPeak::Initialize()
     nRet = CreateFloatProperty("Minimum framerate", framerateMin_, false);
     assert(nRet == DEVICE_OK);
 
-    //// Auto white balance
-    //initializeAutoWBConversion();
-    //status = peak_AutoWhiteBalance_Mode_Get(hCam, &peakAutoWhiteBalance_);
-    //pAct = new CPropertyAction(this, &CIDSPeak::OnAutoWhiteBalance);
-    //nRet = CreateStringProperty("Auto white balance", "Off", false, pAct);
-    //assert(nRet == DEVICE_OK);
+    // Auto white balance
+    initializeAutoWBConversion();
+    status = peak_AutoWhiteBalance_Mode_Get(hCam, &peakAutoWhiteBalance_);
+    pAct = new CPropertyAction(this, &CIDSPeak::OnAutoWhiteBalance);
+    nRet = CreateStringProperty("Auto white balance", "Off", false, pAct);
+    assert(nRet == DEVICE_OK);
 
-    //vector<string> autoWhiteBalanceValues;
-    //autoWhiteBalanceValues.push_back("Off");
-    //autoWhiteBalanceValues.push_back("Once");
-    ////autoWhiteBalanceValues.push_back("Once each Live/snap");
-    //autoWhiteBalanceValues.push_back("Continuous");
+    vector<string> autoWhiteBalanceValues;
+    autoWhiteBalanceValues.push_back("Off");
+    autoWhiteBalanceValues.push_back("Once");
+    autoWhiteBalanceValues.push_back("Continuous");
 
-    //nRet = SetAllowedValues("Auto white balance", autoWhiteBalanceValues);
-    //if (nRet != DEVICE_OK)
-    //    return nRet;
+    nRet = SetAllowedValues("Auto white balance", autoWhiteBalanceValues);
+    if (nRet != DEVICE_OK)
+        return nRet;
 
     // Gain master
     status = peak_Gain_GetRange(hCam, PEAK_GAIN_TYPE_DIGITAL, PEAK_GAIN_CHANNEL_MASTER, &gainMin_, &gainMax_, &gainInc_);
@@ -488,12 +487,17 @@ int CIDSPeak::SnapImage()
         else if (status != PEAK_STATUS_SUCCESS) { return ERR_ACQ_FRAME; }
 
         // At this point we successfully got a frame handle. We can deal with the info now!
-        nRet = transfer_buffer(hFrame, img_);
+        nRet = transferBuffer(hFrame, img_);
 
         // Now we have transfered all information, we can release the frame.
         status = peak_Frame_Release(hCam, hFrame);
         if (PEAK_ERROR(status)) { return ERR_ACQ_RELEASE; }
         pendingFrames--;
+    }
+
+    if (peakAutoWhiteBalance_ != PEAK_AUTO_FEATURE_MODE_OFF)
+    {
+        updateAutoWhiteBalance();
     }
     readoutStartTime_ = GetCurrentMMTime();
     return nRet;
@@ -1106,7 +1110,7 @@ int CIDSPeak::RunSequenceOnThread()
     else { nRet = DEVICE_OK; }
 
     // At this point we successfully got a frame handle. We can deal with the info now!
-    nRet = transfer_buffer(hFrame, img_);
+    nRet = transferBuffer(hFrame, img_);
     if (nRet != DEVICE_OK) { return DEVICE_ERR; }
     else { nRet = DEVICE_OK; }
 
@@ -1118,6 +1122,8 @@ int CIDSPeak::RunSequenceOnThread()
     status = peak_Frame_Release(hCam, hFrame);
     if (status != PEAK_STATUS_SUCCESS) { return DEVICE_ERR; }
     else { nRet = DEVICE_OK; }
+
+    nRet = updateAutoWhiteBalance();
 
     return nRet;
 };
@@ -1329,34 +1335,38 @@ int CIDSPeak::OnBinning(MM::PropertyBase* pProp, MM::ActionType eAct)
     return nRet;
 }
 
-///**
-//* Handles "Auto whitebalance" property.
-//*/
-//int CIDSPeak::OnAutoWhiteBalance(MM::PropertyBase* pProp, MM::ActionType eAct)
-//{
-//
-//    int nRet = DEVICE_OK;
-//
-//
-//    if (eAct == MM::BeforeGet)
-//    {
-//        const char* autoWB = peakAutoToString[peakAutoWhiteBalance_].c_str();
-//        pProp->Set(autoWB);
-//    }
-//
-//    else if (eAct == MM::AfterSet)
-//    {
-//        if (IsCapturing())
-//            return DEVICE_CAMERA_BUSY_ACQUIRING;
-//
-//        string autoWB;
-//        pProp->Get(autoWB);
-//
-//        status = peak_AutoWhiteBalance_Mode_Set(hCam, (peak_auto_feature_mode)stringToPeakAuto[autoWB]);
-//        peakAutoWhiteBalance_ = (peak_auto_feature_mode)stringToPeakAuto[autoWB];
-//    }
-//    return nRet;
-//}
+/**
+* Handles "Auto whitebalance" property.
+*/
+int CIDSPeak::OnAutoWhiteBalance(MM::PropertyBase* pProp, MM::ActionType eAct)
+{
+    int nRet = DEVICE_OK;
+
+    if (eAct == MM::BeforeGet)
+    {
+        if (peak_AutoWhiteBalance_GetAccessStatus(hCam) == PEAK_ACCESS_READWRITE
+            || peak_AutoWhiteBalance_GetAccessStatus(hCam) == PEAK_ACCESS_READONLY)
+        {
+            status = peak_AutoWhiteBalance_Mode_Get(hCam, &peakAutoWhiteBalance_);
+        }
+        const char* autoWB = peakAutoToString[peakAutoWhiteBalance_].c_str();
+        pProp->Set(autoWB);
+    }
+
+    else if (eAct == MM::AfterSet)
+    {
+        if (IsCapturing())
+            return DEVICE_CAMERA_BUSY_ACQUIRING;
+
+        string autoWB;
+        pProp->Get(autoWB);
+
+        status = peak_AutoWhiteBalance_Mode_Set(hCam, (peak_auto_feature_mode)stringToPeakAuto[autoWB]);
+        if (status != PEAK_STATUS_SUCCESS) { nRet = ERR_NO_WRITE_ACCESS; }
+        else { peakAutoWhiteBalance_ = (peak_auto_feature_mode)stringToPeakAuto[autoWB]; }
+    }
+    return nRet;
+}
 
 /**
 * Handles "Gain master" property.
@@ -1366,7 +1376,11 @@ int CIDSPeak::OnGainMaster(MM::PropertyBase* pProp, MM::ActionType eAct)
 
     int nRet = DEVICE_OK;
 
-    if (eAct == MM::BeforeGet) { pProp->Set(gainMaster_); }
+    if (eAct == MM::BeforeGet)
+    {
+
+        pProp->Set(gainMaster_);
+    }
 
     else if (eAct == MM::AfterSet)
     {
@@ -1887,7 +1901,7 @@ peak_status CIDSPeak::getPixelTypes(vector<string>& pixelTypeValues)
     return status;
 }
 
-int CIDSPeak::transfer_buffer(peak_frame_handle hFrame, ImgBuffer& img)
+int CIDSPeak::transferBuffer(peak_frame_handle hFrame, ImgBuffer& img)
 {
     peak_frame_handle hFrameConverted;
     peak_buffer peakBuffer;
@@ -1928,4 +1942,23 @@ int CIDSPeak::transfer_buffer(peak_frame_handle hFrame, ImgBuffer& img)
     if (status != PEAK_STATUS_SUCCESS) { return DEVICE_UNSUPPORTED_DATA_FORMAT; }
 
     return DEVICE_OK;
+}
+
+int CIDSPeak::updateAutoWhiteBalance()
+{
+    if (peak_AutoWhiteBalance_GetAccessStatus(hCam) == PEAK_ACCESS_READONLY
+        || peak_AutoWhiteBalance_GetAccessStatus(hCam) == PEAK_ACCESS_READWRITE)
+    {
+        // Update the gain channels
+        status = peak_Gain_Get(hCam, PEAK_GAIN_TYPE_DIGITAL, PEAK_GAIN_CHANNEL_MASTER, &gainMaster_);
+        status = peak_Gain_Get(hCam, PEAK_GAIN_TYPE_DIGITAL, PEAK_GAIN_CHANNEL_RED, &gainRed_);
+        status = peak_Gain_Get(hCam, PEAK_GAIN_TYPE_DIGITAL, PEAK_GAIN_CHANNEL_GREEN, &gainGreen_);
+        status = peak_Gain_Get(hCam, PEAK_GAIN_TYPE_DIGITAL, PEAK_GAIN_CHANNEL_BLUE, &gainBlue_);
+        // Update the auto white balance mode
+        status = peak_AutoWhiteBalance_Mode_Get(hCam, &peakAutoWhiteBalance_);
+    }
+    else { return ERR_NO_READ_ACCESS; }
+
+    if (status == PEAK_STATUS_SUCCESS) { return DEVICE_OK; }
+    else { return DEVICE_ERR; }
 }
