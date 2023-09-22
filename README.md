@@ -26,7 +26,7 @@ More advanced users could build the device adapter themselves, allowing them to 
 - **The maximum framerate of the 32bit RBGA pixel format is much lower than advertized or with IDS Peak Cockpit.**
   - This is indeed true, the problem is that the camera doesn't support recording BGRA8, which is the only accepted color format of Micro-Manager. Hence, the image has to be recorded in a different pixel format (in this case Bayer RG8) and then converted to BGRA8 on the fly. The maximum obtainable framerate then depends heavily on the (single core) processing speed of your PC. A potential solution is to not do the conversion (just pass the raw bayer data) and perform the debayering after all data is collected.
 - **The minimum interval during the Multi-Dimensional Acquisition (MDA) is approximately 200 ms, even at low exposure times (e.g. 10 ms)**
-  - I have no idea what functions are called by the MDA, and am thus not able to determine the rate limiting step. I will have to contact the developers of Micro-Manager to deepen my understanding of the MDA to be able to determine if we can improve this, and if so how.
+  - This is a limitation of how MDA events are processed. When the interval is set to less than the exposure time, it will record at the maximum framerate possible ~1/exposureTime. Otherwise it will perform something like a timelapse, where it will start the process of acquiring an image after the interval has passed. Sadly the second process has a lot of overhead, which leads to a maximum framerate of ~5 fps. We're currently thinking of ways to fix this.
 - **Changing a value (such as the exposure time) should change another value in the Device Property Browser (like the maximum framerate), but it doesn't update.**
   - The Device Property Browser only updates when it is opened, try closing and re-opening the Device Property Browser.
 
@@ -34,6 +34,7 @@ More advanced users could build the device adapter themselves, allowing them to 
 - More support for other pixel types (10/12 bit grayscale/color)
 - Recording Bayer / Packed images in RAW format (to post-process afterwards)
 - Give more meaningful error messages
+- Improve range of framerates during MDA.
 
 Other suggestions are more than welcome, either create a github issue or send an email to lars.kool@espci.fr
 

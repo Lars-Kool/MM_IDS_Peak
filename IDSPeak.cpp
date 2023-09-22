@@ -495,11 +495,6 @@ int CIDSPeak::SnapImage()
         if (PEAK_ERROR(status)) { return ERR_ACQ_RELEASE; }
         pendingFrames--;
     }
-
-    if (peakAutoWhiteBalance_ != PEAK_AUTO_FEATURE_MODE_OFF)
-    {
-        updateAutoWhiteBalance();
-    }
     readoutStartTime_ = GetCurrentMMTime();
     return nRet;
 }
@@ -967,6 +962,7 @@ int CIDSPeak::SetAllowedBinning()
             binValues.push_back(to_string(binningFactorList[i]));
         }
         LogMessage("Setting Allowed Binning settings", true);
+        free(binningFactorList);
         return SetAllowedValues(MM::g_Keyword_Binning, binValues);
     }
     else { return ERR_NO_READ_ACCESS; }
@@ -1103,8 +1099,6 @@ int CIDSPeak::RunSequenceOnThread()
     status = peak_Frame_Release(hCam, hFrame);
     if (status != PEAK_STATUS_SUCCESS) { return DEVICE_ERR; }
     else { nRet = DEVICE_OK; }
-
-    nRet = updateAutoWhiteBalance();
 
     return nRet;
 };
@@ -1359,7 +1353,7 @@ int CIDSPeak::OnGainMaster(MM::PropertyBase* pProp, MM::ActionType eAct)
 
     if (eAct == MM::BeforeGet)
     {
-
+        status = peak_Gain_Get(hCam, PEAK_GAIN_TYPE_DIGITAL, PEAK_GAIN_CHANNEL_MASTER, &gainMaster_);
         pProp->Set(gainMaster_);
     }
 
@@ -1386,7 +1380,11 @@ int CIDSPeak::OnGainRed(MM::PropertyBase* pProp, MM::ActionType eAct)
 
     int nRet = DEVICE_OK;
 
-    if (eAct == MM::BeforeGet) { pProp->Set(gainRed_); }
+    if (eAct == MM::BeforeGet)
+    {
+        status = peak_Gain_Get(hCam, PEAK_GAIN_TYPE_DIGITAL, PEAK_GAIN_CHANNEL_RED, &gainRed_);
+        pProp->Set(gainRed_);
+    }
 
     else if (eAct == MM::AfterSet)
     {
@@ -1412,7 +1410,11 @@ int CIDSPeak::OnGainGreen(MM::PropertyBase* pProp, MM::ActionType eAct)
 
     int nRet = DEVICE_OK;
 
-    if (eAct == MM::BeforeGet) { pProp->Set(gainGreen_); }
+    if (eAct == MM::BeforeGet)
+    {
+        status = peak_Gain_Get(hCam, PEAK_GAIN_TYPE_DIGITAL, PEAK_GAIN_CHANNEL_GREEN, &gainGreen_);
+        pProp->Set(gainGreen_);
+    }
 
     else if (eAct == MM::AfterSet)
     {
@@ -1438,7 +1440,11 @@ int CIDSPeak::OnGainBlue(MM::PropertyBase* pProp, MM::ActionType eAct)
 
     int nRet = DEVICE_OK;
 
-    if (eAct == MM::BeforeGet) { pProp->Set(gainBlue_); }
+    if (eAct == MM::BeforeGet)
+    {
+        status = peak_Gain_Get(hCam, PEAK_GAIN_TYPE_DIGITAL, PEAK_GAIN_CHANNEL_BLUE, &gainBlue_);
+        pProp->Set(gainRed_);
+    }
 
     else if (eAct == MM::AfterSet)
     {
@@ -1878,6 +1884,7 @@ peak_status CIDSPeak::getPixelTypes(vector<string>& pixelTypeValues)
                 pixelTypeValues.push_back(peakTypeToString[pixelFormatList[i]].c_str());
             }
         }
+        free(pixelFormatList);
     }
     return status;
 }
