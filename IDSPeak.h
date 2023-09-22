@@ -7,6 +7,7 @@
 //
 //                Based on IDS peak SDK and Micromanager DemoCamera example
 //                tested with SDK version 2.5
+//                Requires Micro-manager Device API 71 or higher!
 //                
 // AUTHOR:        Lars Kool, Institut Pierre-Gilles de Gennes
 //
@@ -25,7 +26,7 @@
 //                CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
 //                INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES.
 //
-//LAST UPDATE:    18.09.2023 LK
+//LAST UPDATE:    21.09.2023 LK
 
 #ifndef _IDSPeak_H_
 #define _IDSPeak_H_
@@ -235,7 +236,6 @@ private:
     std::string triggerDevice_;
     map<int, string> peakTypeToString;
     map<string, int> stringToPeakType;
-    peak_pixel_format pixelTypePeak_;
     peak_auto_feature_mode peakAutoWhiteBalance_;
 
     map<int, string> peakAutoToString;

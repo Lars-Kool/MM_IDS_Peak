@@ -26,7 +26,7 @@
 //                CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
 //                INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES.
 //
-//LAST UPDATE:    18.09.2023 LK
+//LAST UPDATE:    21.09.2023 LK
 
 #include <time.h>
 #include "IDSPeak.h"
@@ -45,6 +45,8 @@
 using namespace std;
 const double CIDSPeak::nominalPixelSizeUm_ = 1.0;
 double g_IntensityFactor_ = 1.0;
+const char* g_PixelType_8bit = "8bit";
+const char* g_PixelType_32bitRGBA = "32bit RGBA";
 
 // External names used used by the rest of the system
 // to load particular device from the "IDSPeak.dll" library
@@ -127,7 +129,6 @@ CIDSPeak::CIDSPeak() :
     framerateMin_(0.1),
     framerateInc_(0.1),
     imageCounter_(0),
-    pixelTypePeak_(PEAK_PIXEL_FORMAT_MONO8),
     gainMaster_(1.0),
     gainRed_(1.0),
     gainGreen_(1.0),
@@ -249,14 +250,14 @@ int CIDSPeak::Initialize()
         return nRet;
 
     // pixel type
-    initializePixelTypeConv();
-    pixelTypePeak_ = PEAK_PIXEL_FORMAT_MONO8;
+    status = peak_PixelFormat_Set(hCam, PEAK_PIXEL_FORMAT_MONO8);
     pAct = new CPropertyAction(this, &CIDSPeak::OnPixelType);
-    nRet = CreateStringProperty(MM::g_Keyword_PixelType, peakTypeToString[pixelTypePeak_].c_str(), false, pAct);
+    nRet = CreateStringProperty(MM::g_Keyword_PixelType, g_PixelType_8bit, false, pAct);
     assert(nRet == DEVICE_OK);
 
     vector<string> pixelTypeValues;
-    getPixelTypes(pixelTypeValues);
+    pixelTypeValues.push_back(g_PixelType_8bit);
+    pixelTypeValues.push_back(g_PixelType_32bitRGBA);
 
     nRet = SetAllowedValues(MM::g_Keyword_PixelType, pixelTypeValues);
     if (nRet != DEVICE_OK)
@@ -284,22 +285,22 @@ int CIDSPeak::Initialize()
     nRet = CreateFloatProperty("Minimum framerate", framerateMin_, false);
     assert(nRet == DEVICE_OK);
 
-    // Auto white balance
-    initializeAutoWBConversion();
-    status = peak_AutoWhiteBalance_Mode_Get(hCam, &peakAutoWhiteBalance_);
-    pAct = new CPropertyAction(this, &CIDSPeak::OnAutoWhiteBalance);
-    nRet = CreateStringProperty("Auto white balance", "Off", false, pAct);
-    assert(nRet == DEVICE_OK);
+    //// Auto white balance
+    //initializeAutoWBConversion();
+    //status = peak_AutoWhiteBalance_Mode_Get(hCam, &peakAutoWhiteBalance_);
+    //pAct = new CPropertyAction(this, &CIDSPeak::OnAutoWhiteBalance);
+    //nRet = CreateStringProperty("Auto white balance", "Off", false, pAct);
+    //assert(nRet == DEVICE_OK);
 
-    vector<string> autoWhiteBalanceValues;
-    autoWhiteBalanceValues.push_back("Off");
-    autoWhiteBalanceValues.push_back("Once");
-    //autoWhiteBalanceValues.push_back("Once each Live/snap");
-    autoWhiteBalanceValues.push_back("Continuous");
+    //vector<string> autoWhiteBalanceValues;
+    //autoWhiteBalanceValues.push_back("Off");
+    //autoWhiteBalanceValues.push_back("Once");
+    ////autoWhiteBalanceValues.push_back("Once each Live/snap");
+    //autoWhiteBalanceValues.push_back("Continuous");
 
-    nRet = SetAllowedValues("Auto white balance", autoWhiteBalanceValues);
-    if (nRet != DEVICE_OK)
-        return nRet;
+    //nRet = SetAllowedValues("Auto white balance", autoWhiteBalanceValues);
+    //if (nRet != DEVICE_OK)
+    //    return nRet;
 
     // Gain master
     status = peak_Gain_GetRange(hCam, PEAK_GAIN_TYPE_DIGITAL, PEAK_GAIN_CHANNEL_MASTER, &gainMin_, &gainMax_, &gainInc_);
@@ -407,7 +408,8 @@ int CIDSPeak::Initialize()
     nRet = UpdateStatus();
     if (nRet != DEVICE_OK)
         return nRet;
-
+    
+    // Debug framerate recording
     nRet = CreateFloatProperty("Interval", 0, false);
     assert(nRet == DEVICE_OK);
 
@@ -483,11 +485,10 @@ int CIDSPeak::SnapImage()
             else { continue; }
         }
         else if (status == PEAK_STATUS_ABORTED) { break; }
-        else if (PEAK_ERROR(status)) { return ERR_ACQ_FRAME; }
+        else if (status != PEAK_STATUS_SUCCESS) { return ERR_ACQ_FRAME; }
 
         // At this point we successfully got a frame handle. We can deal with the info now!
         nRet = transfer_buffer(hFrame, img_);
-        assert(nRet == DEVICE_OK);
 
         // Now we have transfered all information, we can release the frame.
         status = peak_Frame_Release(hCam, hFrame);
@@ -579,6 +580,7 @@ long CIDSPeak::GetImageBufferSize() const
 */
 int CIDSPeak::SetROI(unsigned x, unsigned y, unsigned xSize, unsigned ySize)
 {
+    int ret = DEVICE_OK;
     if (peak_ROI_GetAccessStatus(hCam) == PEAK_ACCESS_READWRITE)
     {
         multiROIXs_.clear();
@@ -618,10 +620,9 @@ int CIDSPeak::SetROI(unsigned x, unsigned y, unsigned xSize, unsigned ySize)
         roi.size.width = xSize;
         roi.size.height = ySize;
         status = peak_ROI_Set(hCam, roi);
-        if (status == PEAK_STATUS_SUCCESS) { return DEVICE_OK; }
-        else { return ERR_NO_WRITE_ACCESS; }
     }
     else { return DEVICE_CAN_NOT_SET_PROPERTY; }
+    return ret;
 }
 
 /**
@@ -832,11 +833,6 @@ void CIDSPeak::SetExposure(double exp)
         status = peak_ExposureTime_Get(hCam, &exposureCur_);
         SetProperty(MM::g_Keyword_Exposure, CDeviceUtils::ConvertToString(exposureCur_ / 1000));
         GetCoreCallback()->OnExposureChanged(this, exp);
-
-        // Change maximum framerate accordingly
-        status = peak_FrameRate_GetRange(hCam, &framerateMin_, &framerateMax_, &framerateInc_);
-        SetProperty("Maximum framerate", CDeviceUtils::ConvertToString(framerateMax_));
-        SetProperty("Minimum framerate", CDeviceUtils::ConvertToString(framerateMax_));
     }
 }
 
@@ -860,10 +856,16 @@ int CIDSPeak::SetBinning(int binF)
 {
     if (peak_Binning_GetAccessStatus(hCam) == PEAK_ACCESS_READWRITE)
     {
+        // Update binning
         status = peak_Binning_Set(hCam, (uint32_t)binF, (uint32_t)binF);
         if (status != PEAK_STATUS_SUCCESS) { return DEVICE_ERR; }
         binSize_ = binF;
         int ret = SetProperty(MM::g_Keyword_Binning, CDeviceUtils::ConvertToString(binF));
+
+        // Update framerate range (since binning affects the maximum framerate)
+        status = peak_FrameRate_GetRange(hCam, &framerateMin_, &framerateMax_, &framerateInc_);
+        ret = SetProperty("Maximum framerate", CDeviceUtils::ConvertToString(framerateMax_));
+        ret = SetProperty("Minimum framerate", CDeviceUtils::ConvertToString(framerateMin_));
         return ret;
     }
     else { return ERR_NO_WRITE_ACCESS; }
@@ -997,7 +999,9 @@ int CIDSPeak::StopSequenceAcquisition()
 int CIDSPeak::StartSequenceAcquisition(long numImages, double interval_ms, bool stopOnOverflow)
 {
     if (IsCapturing())
+    {
         return DEVICE_CAMERA_BUSY_ACQUIRING;
+    }
 
     // Make sure interval is less than exposure time
     // Half a millisecond buffer to make sure sensor can dump info
@@ -1016,10 +1020,15 @@ int CIDSPeak::StartSequenceAcquisition(long numImages, double interval_ms, bool 
     {
         interval_ms = 1000 / framerateMin_;
     }
+
+    int nRet = SetProperty("Interval", CDeviceUtils::ConvertToString(interval_ms));
+
     // Adjust framerate to match requested interval between frames
     status = peak_FrameRate_Set(hCam, 1000 / interval_ms);
+    framerateCur_ = 1000 / interval_ms;
 
-    int nRet = GetCoreCallback()->PrepareForAcq(this);
+    // Wait until shutter is ready
+    nRet = GetCoreCallback()->PrepareForAcq(this);
     if (nRet != DEVICE_OK)
         return nRet;
     sequenceStartTime_ = GetCurrentMMTime();
@@ -1237,51 +1246,6 @@ int MySequenceThread::svc(void) throw()
 // CIDSPeak Action handlers
 ///////////////////////////////////////////////////////////////////////////////
 
-/**
-* Handles "Frame Rate" property.
-*/
-int CIDSPeak::OnFramerate(MM::PropertyBase* pProp, MM::ActionType eAct)
-{
-
-    int nRet = DEVICE_OK;
-
-    if (eAct == MM::BeforeGet) { pProp->Set(framerateCur_); }
-
-    else if (eAct == MM::AfterSet)
-    {
-        if (IsCapturing())
-            return DEVICE_CAMERA_BUSY_ACQUIRING;
-
-        double framerateSet;
-        pProp->Get(framerateSet);
-
-        // Make framerate multiple of increment
-        framerateCur_ = ceil(framerateSet / framerateInc_) * framerateInc_;
-        if (peak_FrameRate_GetAccessStatus(hCam) == PEAK_ACCESS_READWRITE)
-        {
-            if (framerateCur_ <= framerateMin_)
-            {
-                status = peak_FrameRate_Set(hCam, framerateMin_);
-            }
-            else if (framerateCur_ >= framerateMax_)
-            {
-                status = peak_FrameRate_Set(hCam, framerateMin_);
-            }
-            else
-            {
-                status = peak_FrameRate_Set(hCam, framerateCur_);
-            }
-            if (status == PEAK_STATUS_SUCCESS)
-            {
-                nRet = DEVICE_OK;
-            }
-            else { nRet = DEVICE_ERR; }
-        }
-        else { nRet = ERR_NO_WRITE_ACCESS; }
-    }
-    return nRet;
-}
-
 int CIDSPeak::OnMaxExposure(MM::PropertyBase* pProp, MM::ActionType eAct)
 {
     if (eAct == MM::BeforeGet)
@@ -1343,8 +1307,10 @@ int CIDSPeak::OnBinning(MM::PropertyBase* pProp, MM::ActionType eAct)
                 multiROIWidths_[i] = (unsigned int)(multiROIWidths_[i] / factor);
                 multiROIHeights_[i] = (unsigned int)(multiROIHeights_[i] / factor);
             }
-            img_.Resize((unsigned int)(img_.Width() / factor),
-                (unsigned int)(img_.Height() / factor));
+            img_.Resize(
+                (unsigned int)(img_.Width() / factor),
+                (unsigned int)(img_.Height() / factor)
+            );
             binSize_ = binFactor;
             std::ostringstream os;
             os << binSize_;
@@ -1363,34 +1329,34 @@ int CIDSPeak::OnBinning(MM::PropertyBase* pProp, MM::ActionType eAct)
     return nRet;
 }
 
-/**
-* Handles "Auto whitebalance" property.
-*/
-int CIDSPeak::OnAutoWhiteBalance(MM::PropertyBase* pProp, MM::ActionType eAct)
-{
-
-    int nRet = DEVICE_OK;
-
-
-    if (eAct == MM::BeforeGet)
-    {
-        const char* autoWB = peakAutoToString[peakAutoWhiteBalance_].c_str();
-        pProp->Set(autoWB);
-    }
-
-    else if (eAct == MM::AfterSet)
-    {
-        if (IsCapturing())
-            return DEVICE_CAMERA_BUSY_ACQUIRING;
-
-        string autoWB;
-        pProp->Get(autoWB);
-
-        status = peak_AutoWhiteBalance_Mode_Set(hCam, (peak_auto_feature_mode)stringToPeakAuto[autoWB]);
-        peakAutoWhiteBalance_ = (peak_auto_feature_mode)stringToPeakAuto[autoWB];
-    }
-    return nRet;
-}
+///**
+//* Handles "Auto whitebalance" property.
+//*/
+//int CIDSPeak::OnAutoWhiteBalance(MM::PropertyBase* pProp, MM::ActionType eAct)
+//{
+//
+//    int nRet = DEVICE_OK;
+//
+//
+//    if (eAct == MM::BeforeGet)
+//    {
+//        const char* autoWB = peakAutoToString[peakAutoWhiteBalance_].c_str();
+//        pProp->Set(autoWB);
+//    }
+//
+//    else if (eAct == MM::AfterSet)
+//    {
+//        if (IsCapturing())
+//            return DEVICE_CAMERA_BUSY_ACQUIRING;
+//
+//        string autoWB;
+//        pProp->Get(autoWB);
+//
+//        status = peak_AutoWhiteBalance_Mode_Set(hCam, (peak_auto_feature_mode)stringToPeakAuto[autoWB]);
+//        peakAutoWhiteBalance_ = (peak_auto_feature_mode)stringToPeakAuto[autoWB];
+//    }
+//    return nRet;
+//}
 
 /**
 * Handles "Gain master" property.
@@ -1513,44 +1479,41 @@ int CIDSPeak::OnPixelType(MM::PropertyBase* pProp, MM::ActionType eAct)
 
         if (peak_PixelFormat_GetAccessStatus(hCam) == PEAK_ACCESS_READWRITE)
         {
-            // Get the pixel info corresponding to the pixel type to be set
-            peak_pixel_format_info formatInfo;
-            pixelTypePeak_ = (peak_pixel_format)stringToPeakType[pixelType];
-            // Set the pixelformat on the camera
-            status = peak_PixelFormat_Set(hCam, pixelTypePeak_);
-            if (status != PEAK_STATUS_SUCCESS) { return ERR_NO_WRITE_ACCESS; }
-            // Get info to allocate the buffer properly
-            status = peak_PixelFormat_GetInfo(pixelTypePeak_, &formatInfo);
-            if (status != PEAK_STATUS_SUCCESS) { return DEVICE_ERR; }
-
-            if (pixelTypePeak_ == PEAK_PIXEL_FORMAT_MONO8 ||
-                pixelTypePeak_ == PEAK_PIXEL_FORMAT_MONO10 ||
-                pixelTypePeak_ == PEAK_PIXEL_FORMAT_MONO12)
+            if (pixelType == g_PixelType_8bit)
             {
+                status = peak_PixelFormat_Set(hCam, PEAK_PIXEL_FORMAT_MONO8);
                 nComponents_ = 1;
             }
             else
             {
-                // Even though all color formats only have 3 components, 
-                // MM expects all color formats to be in ABGR.
+                status = peak_PixelFormat_Set(hCam, PEAK_PIXEL_FORMAT_BAYER_RG8);
                 nComponents_ = 4;
             }
-            significantBitDepth_ = formatInfo.numSignificantBitsPerChannel;
-            bitDepth_ = formatInfo.numBitsPerChannel;
-            if (bitDepth_ > 8)
-            {
-                bitDepth_ = 16;
-            }
-            // Resize buffer to accomodate the new image
-            img_.Resize(img_.Width(), img_.Height(), nComponents_ * (bitDepth_ / 8));
-            nRet = DEVICE_OK;
         }
-        else { return ERR_NO_WRITE_ACCESS; }
+        else
+        {
+            return ERR_NO_WRITE_ACCESS;
+        }
+
+        // Only 8bit formats are supported for now
+        bitDepth_ = 8;
+
+        // Resize buffer to accomodate the new image
+        img_.Resize(img_.Width(), img_.Height(), nComponents_ * (bitDepth_ / 8));
+        nRet = DEVICE_OK;        
     }
     break;
     case MM::BeforeGet:
     {
-        pProp->Set(peakTypeToString[pixelTypePeak_].c_str());
+        if (nComponents_ == 1)
+        {
+            pProp->Set(g_PixelType_8bit);
+        }
+        else
+        {
+            pProp->Set(g_PixelType_32bitRGBA);
+        }
+       
     } break;
     default:
         break;
@@ -1719,16 +1682,7 @@ int CIDSPeak::ResizeImageBuffer()
         return nRet;
     binSize_ = atol(buf);
 
-    nRet = GetProperty(MM::g_Keyword_PixelType, buf);
-    if (nRet != DEVICE_OK)
-        return nRet;
-
-    int byteDepth = 0;
-    peak_pixel_format_info formatInfo;
-    status = peak_PixelFormat_GetInfo(pixelTypePeak_, &formatInfo);
-    byteDepth = 1;
-
-    img_.Resize(cameraCCDXSize_ / binSize_, cameraCCDYSize_ / binSize_, byteDepth);
+    img_.Resize(cameraCCDXSize_ / binSize_, cameraCCDYSize_ / binSize_, nComponents_ * (bitDepth_/8));
     return DEVICE_OK;
 }
 
@@ -1899,92 +1853,6 @@ peak_status CIDSPeak::getGFAfloat(const char* featureName, double* floatValue)
     return status;
 }
 
-// Initialization of the conversion dictonaries between the integer representation
-// of all peak pixel formats(not only the ones supported by the device!)
-// and a human readable format
-void CIDSPeak::initializePixelTypeConv()
-{
-    peakTypeToString.insert(pair<int, string>(PEAK_PIXEL_FORMAT_BAYER_GR8, "8bit Bayer GR"));
-    peakTypeToString.insert(pair<int, string>(PEAK_PIXEL_FORMAT_BAYER_GR10, "10bit Bayer GR"));
-    peakTypeToString.insert(pair<int, string>(PEAK_PIXEL_FORMAT_BAYER_GR12, "12bit Bayer GR"));
-    peakTypeToString.insert(pair<int, string>(PEAK_PIXEL_FORMAT_BAYER_RG8, "8bit Bayer RG"));
-    peakTypeToString.insert(pair<int, string>(PEAK_PIXEL_FORMAT_BAYER_RG10, "10bit Bayer RG"));
-    peakTypeToString.insert(pair<int, string>(PEAK_PIXEL_FORMAT_BAYER_RG12, "12bit Bayer RG"));
-    peakTypeToString.insert(pair<int, string>(PEAK_PIXEL_FORMAT_BAYER_GB8, "8bit Bayer GB"));
-    peakTypeToString.insert(pair<int, string>(PEAK_PIXEL_FORMAT_BAYER_GB10, "10bit Bayer GB"));
-    peakTypeToString.insert(pair<int, string>(PEAK_PIXEL_FORMAT_BAYER_GB12, "12bit Bayer GB"));
-    peakTypeToString.insert(pair<int, string>(PEAK_PIXEL_FORMAT_BAYER_BG8, "8bit Bayer BG"));
-    peakTypeToString.insert(pair<int, string>(PEAK_PIXEL_FORMAT_BAYER_BG10, "10bit Bayer BG"));
-    peakTypeToString.insert(pair<int, string>(PEAK_PIXEL_FORMAT_BAYER_BG12, "8bit Bayer BG"));
-    peakTypeToString.insert(pair<int, string>(PEAK_PIXEL_FORMAT_MONO8, "8bit Mono"));
-    peakTypeToString.insert(pair<int, string>(PEAK_PIXEL_FORMAT_MONO10, "10bit Mono"));
-    peakTypeToString.insert(pair<int, string>(PEAK_PIXEL_FORMAT_MONO12, "12bit Mono"));
-    peakTypeToString.insert(pair<int, string>(PEAK_PIXEL_FORMAT_RGB8, "8bit RGB"));
-    peakTypeToString.insert(pair<int, string>(PEAK_PIXEL_FORMAT_RGB10, "10bit RGB"));
-    peakTypeToString.insert(pair<int, string>(PEAK_PIXEL_FORMAT_RGB12, "12bit RGB"));
-    peakTypeToString.insert(pair<int, string>(PEAK_PIXEL_FORMAT_BGR8, "8bit BGR"));
-    peakTypeToString.insert(pair<int, string>(PEAK_PIXEL_FORMAT_BGR10, "10bit BGR"));
-    peakTypeToString.insert(pair<int, string>(PEAK_PIXEL_FORMAT_BGR12, "12bit BGR"));
-    peakTypeToString.insert(pair<int, string>(PEAK_PIXEL_FORMAT_RGBA8, "8bit RGBA"));
-    peakTypeToString.insert(pair<int, string>(PEAK_PIXEL_FORMAT_RGBA10, "10bit RGBA"));
-    peakTypeToString.insert(pair<int, string>(PEAK_PIXEL_FORMAT_RGBA12, "12bit RGBA"));
-    peakTypeToString.insert(pair<int, string>(PEAK_PIXEL_FORMAT_BGRA8, "8bit BGRA"));
-    peakTypeToString.insert(pair<int, string>(PEAK_PIXEL_FORMAT_BGRA10, "10bit BGRA"));
-    peakTypeToString.insert(pair<int, string>(PEAK_PIXEL_FORMAT_BGRA12, "12bit BGRA"));
-    peakTypeToString.insert(pair<int, string>(PEAK_PIXEL_FORMAT_BAYER_GR10P, "10bit Bayer GR Packed"));
-    peakTypeToString.insert(pair<int, string>(PEAK_PIXEL_FORMAT_BAYER_GR12P, "12bit Bayer GR Packed"));
-    peakTypeToString.insert(pair<int, string>(PEAK_PIXEL_FORMAT_BAYER_RG10P, "10bit Bayer RG Packed"));
-    peakTypeToString.insert(pair<int, string>(PEAK_PIXEL_FORMAT_BAYER_RG12P, "12bit Bayer RG Packed"));
-    peakTypeToString.insert(pair<int, string>(PEAK_PIXEL_FORMAT_BAYER_GB10P, "10bit Bayer GB Packed"));
-    peakTypeToString.insert(pair<int, string>(PEAK_PIXEL_FORMAT_BAYER_GB12P, "12bit Bayer GB Packed"));
-    peakTypeToString.insert(pair<int, string>(PEAK_PIXEL_FORMAT_BAYER_BG10P, "10bit Bayer BG Packed"));
-    peakTypeToString.insert(pair<int, string>(PEAK_PIXEL_FORMAT_BAYER_BG12P, "12bit Bayer GB Packed"));
-    peakTypeToString.insert(pair<int, string>(PEAK_PIXEL_FORMAT_MONO10P, "10bit Mono Packed"));
-    peakTypeToString.insert(pair<int, string>(PEAK_PIXEL_FORMAT_MONO12P, "12bit Mono Packed"));
-    peakTypeToString.insert(pair<int, string>(PEAK_PIXEL_FORMAT_RGB10P32, "10bit RGB Packed 32"));
-    peakTypeToString.insert(pair<int, string>(PEAK_PIXEL_FORMAT_BGR10P32, "10bit BGR Packed 32"));
-
-    stringToPeakType.insert(pair<string, int>("8bit Bayer GR", PEAK_PIXEL_FORMAT_BAYER_GR8));
-    stringToPeakType.insert(pair<string, int>("10bit Bayer GR", PEAK_PIXEL_FORMAT_BAYER_GR10));
-    stringToPeakType.insert(pair<string, int>("12bit Bayer GR", PEAK_PIXEL_FORMAT_BAYER_GR12));
-    stringToPeakType.insert(pair<string, int>("8bit Bayer RG", PEAK_PIXEL_FORMAT_BAYER_RG8));
-    stringToPeakType.insert(pair<string, int>("10bit Bayer RG", PEAK_PIXEL_FORMAT_BAYER_RG10));
-    stringToPeakType.insert(pair<string, int>("12bit Bayer RG", PEAK_PIXEL_FORMAT_BAYER_RG12));
-    stringToPeakType.insert(pair<string, int>("8bit Bayer GB", PEAK_PIXEL_FORMAT_BAYER_GB8));
-    stringToPeakType.insert(pair<string, int>("10bit Bayer GB", PEAK_PIXEL_FORMAT_BAYER_GB10));
-    stringToPeakType.insert(pair<string, int>("12bit Bayer GB", PEAK_PIXEL_FORMAT_BAYER_GB12));
-    stringToPeakType.insert(pair<string, int>("8bit Bayer BG", PEAK_PIXEL_FORMAT_BAYER_BG8));
-    stringToPeakType.insert(pair<string, int>("10bit Bayer BG", PEAK_PIXEL_FORMAT_BAYER_BG10));
-    stringToPeakType.insert(pair<string, int>("8bit Bayer BG", PEAK_PIXEL_FORMAT_BAYER_BG12));
-    stringToPeakType.insert(pair<string, int>("8bit Mono", PEAK_PIXEL_FORMAT_MONO8));
-    stringToPeakType.insert(pair<string, int>("10bit Mono", PEAK_PIXEL_FORMAT_MONO10));
-    stringToPeakType.insert(pair<string, int>("12bit Mono", PEAK_PIXEL_FORMAT_MONO12));
-    stringToPeakType.insert(pair<string, int>("8bit RGB", PEAK_PIXEL_FORMAT_RGB8));
-    stringToPeakType.insert(pair<string, int>("10bit RGB", PEAK_PIXEL_FORMAT_RGB10));
-    stringToPeakType.insert(pair<string, int>("12bit RGB", PEAK_PIXEL_FORMAT_RGB12));
-    stringToPeakType.insert(pair<string, int>("8bit BGR", PEAK_PIXEL_FORMAT_BGR8));
-    stringToPeakType.insert(pair<string, int>("10bit BGR", PEAK_PIXEL_FORMAT_BGR10));
-    stringToPeakType.insert(pair<string, int>("12bit BGR", PEAK_PIXEL_FORMAT_BGR12));
-    stringToPeakType.insert(pair<string, int>("8bit RGBA", PEAK_PIXEL_FORMAT_RGBA8));
-    stringToPeakType.insert(pair<string, int>("10bit RGBA", PEAK_PIXEL_FORMAT_RGBA10));
-    stringToPeakType.insert(pair<string, int>("12bit RGBA", PEAK_PIXEL_FORMAT_RGBA12));
-    stringToPeakType.insert(pair<string, int>("8bit BGRA", PEAK_PIXEL_FORMAT_BGRA8));
-    stringToPeakType.insert(pair<string, int>("10bit BGRA", PEAK_PIXEL_FORMAT_BGRA10));
-    stringToPeakType.insert(pair<string, int>("12bit BGRA", PEAK_PIXEL_FORMAT_BGRA12));
-    stringToPeakType.insert(pair<string, int>("10bit Bayer GR Packed", PEAK_PIXEL_FORMAT_BAYER_GR10P));
-    stringToPeakType.insert(pair<string, int>("12bit Bayer GR Packed", PEAK_PIXEL_FORMAT_BAYER_GR12P));
-    stringToPeakType.insert(pair<string, int>("10bit Bayer RG Packed", PEAK_PIXEL_FORMAT_BAYER_RG10P));
-    stringToPeakType.insert(pair<string, int>("12bit Bayer RG Packed", PEAK_PIXEL_FORMAT_BAYER_RG12P));
-    stringToPeakType.insert(pair<string, int>("10bit Bayer GB Packed", PEAK_PIXEL_FORMAT_BAYER_GB10P));
-    stringToPeakType.insert(pair<string, int>("12bit Bayer GB Packed", PEAK_PIXEL_FORMAT_BAYER_GB12P));
-    stringToPeakType.insert(pair<string, int>("10bit Bayer BG Packed", PEAK_PIXEL_FORMAT_BAYER_BG10P));
-    stringToPeakType.insert(pair<string, int>("12bit Bayer GB Packed", PEAK_PIXEL_FORMAT_BAYER_BG12P));
-    stringToPeakType.insert(pair<string, int>("10bit Mono Packed", PEAK_PIXEL_FORMAT_MONO10P));
-    stringToPeakType.insert(pair<string, int>("12bit Mono Packed", PEAK_PIXEL_FORMAT_MONO12P));
-    stringToPeakType.insert(pair<string, int>("10bit RGB Packed 32", PEAK_PIXEL_FORMAT_RGB10P32));
-    stringToPeakType.insert(pair<string, int>("10bit BGR Packed 32", PEAK_PIXEL_FORMAT_BGR10P32));
-}
-
 void CIDSPeak::initializeAutoWBConversion()
 {
     peakAutoToString.insert(pair<int, string>(PEAK_AUTO_FEATURE_MODE_OFF, "Off"));
@@ -2032,47 +1900,32 @@ int CIDSPeak::transfer_buffer(peak_frame_handle hFrame, ImgBuffer& img)
     if (nComponents_ == 1)
     {
         status = peak_Frame_Buffer_Get(hFrame, &peakBuffer);
+        // Transfer the frame buffer to the img buffer expected by MM.
+        memoryAddress = peakBuffer.memoryAddress;
+        memorySize = peakBuffer.memorySize;
+        memcpy(pBuf, memoryAddress, memorySize);
     }
     // Convert all 8bit pixel formats into BGRA8 (8bit format expected by MM)
-    else if (nComponents_ == 4 && significantBitDepth_ == 8)
+    else if (nComponents_ == 4)
     {
         status = peak_IPL_PixelFormat_Set(hCam, PEAK_PIXEL_FORMAT_BGRA8);
         if (status != PEAK_STATUS_SUCCESS) { return DEVICE_UNSUPPORTED_DATA_FORMAT; }
         status = peak_IPL_ProcessFrame(hCam, hFrame, &hFrameConverted);
         if (status != PEAK_STATUS_SUCCESS) { return DEVICE_UNSUPPORTED_DATA_FORMAT; }
         status = peak_Frame_Buffer_Get(hFrameConverted, &peakBuffer);
+        // Transfer the frame buffer to the img buffer expected by MM.
+        memoryAddress = peakBuffer.memoryAddress;
+        memorySize = peakBuffer.memorySize;
+        memcpy(pBuf, memoryAddress, memorySize);
+        peak_Frame_Release(hCam, hFrameConverted);
     }
-    // Convert all 10bit pixel formats into BGRA10
-    // MM handles this as BGRA16, as it is unable to deal with 10bit images
-    // This means that the 6 most significant bits are always zero
-    // This shouldn't affect anything, just adjust the dynamic range in the live view
-    else if (nComponents_ == 4 && significantBitDepth_ == 10)
+    else
     {
-        status = peak_IPL_PixelFormat_Set(hCam, PEAK_PIXEL_FORMAT_BGRA10);
-        if (status != PEAK_STATUS_SUCCESS) { return DEVICE_UNSUPPORTED_DATA_FORMAT; }
-        status = peak_IPL_ProcessFrame(hCam, hFrame, &hFrameConverted);
-        if (status != PEAK_STATUS_SUCCESS) { return DEVICE_UNSUPPORTED_DATA_FORMAT; }
-        status = peak_Frame_Buffer_Get(hFrameConverted, &peakBuffer);
+        return DEVICE_UNSUPPORTED_DATA_FORMAT;
     }
-    // Convert all 12bit pixel formats into BGRA12
-    // MM handles this as BGRA16, as it is unable to deal with 12bit images
-    else if (nComponents_ == 4 && significantBitDepth_ == 12)
-    {
-        status = peak_IPL_PixelFormat_Set(hCam, PEAK_PIXEL_FORMAT_BGRA12);
-        if (status != PEAK_STATUS_SUCCESS) { return DEVICE_UNSUPPORTED_DATA_FORMAT; }
-        status = peak_IPL_ProcessFrame(hCam, hFrame, &hFrameConverted);
-        if (status != PEAK_STATUS_SUCCESS) { return DEVICE_UNSUPPORTED_DATA_FORMAT; }
-        status = peak_Frame_Buffer_Get(hFrameConverted, &peakBuffer);
-    }
-    else { status = peak_Frame_Buffer_Get(hFrame, &peakBuffer); }
 
     // Exit if something went wrong during the conversion/obtaining the buffer.
     if (status != PEAK_STATUS_SUCCESS) { return DEVICE_UNSUPPORTED_DATA_FORMAT; }
-
-    // Transfer the frame buffer to the img buffer expected by MM.
-    memoryAddress = peakBuffer.memoryAddress;
-    memorySize = peakBuffer.memorySize;
-    memcpy(pBuf, memoryAddress, memorySize);
 
     return DEVICE_OK;
 }
