@@ -5,8 +5,7 @@
 //-----------------------------------------------------------------------------
 // DESCRIPTION:   Driver for IDS peak series of USB cameras
 //
-//                Based on IDS peak SDK and Micromanager DemoCamera example
-//                tested with SDK version 2.5
+//                Based on IDS peak SDK comfort API (version 2.5) and Micromanager DemoCamera example
 //                Requires Micro-manager Device API 71 or higher!
 //                
 // AUTHOR:        Lars Kool, Institut Pierre-Gilles de Gennes
@@ -26,7 +25,7 @@
 //                CONTRIBUTORS BE   LIABLE FOR ANY DIRECT, INDIRECT,
 //                INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES.
 //
-//LAST UPDATE:    21.09.2023 LK
+//LAST UPDATE:    25.09.2023 LK
 
 #ifndef _IDSPeak_H_
 #define _IDSPeak_H_

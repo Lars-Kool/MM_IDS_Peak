@@ -1,12 +1,11 @@
 ///////////////////////////////////////////////////////////////////////////////
-// FILE:          IDSPeak.cpp
+// FILE:          IDSPeak.h
 // PROJECT:       Micro-Manager
 // SUBSYSTEM:     DeviceAdapters
 //-----------------------------------------------------------------------------
 // DESCRIPTION:   Driver for IDS peak series of USB cameras
 //
-//                Based on IDS peak SDK and Micro-manager DemoCamera example
-//                tested with SDK version 2.5
+//                Based on IDS peak SDK comfort API (version 2.5) and Micromanager DemoCamera example
 //                Requires Micro-manager Device API 71 or higher!
 //                
 // AUTHOR:        Lars Kool, Institut Pierre-Gilles de Gennes
@@ -23,10 +22,10 @@
 //                of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 //
 //                IN NO EVENT SHALL THE COPYRIGHT OWNER OR
-//                CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+//                CONTRIBUTORS BE   LIABLE FOR ANY DIRECT, INDIRECT,
 //                INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES.
 //
-//LAST UPDATE:    21.09.2023 LK
+//LAST UPDATE:    25.09.2023 LK
 
 #include <time.h>
 #include "IDSPeak.h"
