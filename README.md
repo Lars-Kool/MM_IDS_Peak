@@ -23,21 +23,28 @@ More advanced users could build the device adapter themselves, allowing them to 
 7. The .dll file can now be found in ".\micro-manager\mmCoreAndDevices\build\Debug\x64".
 8. Now you have compiled the .dll, follow the steps under "Using the precompiled .dll" to enable Micro-Manager to communicate with IDS cameras.
 
+## Features
+- Imaging in grayscale and 32bit RGBA. One can switch between 8bit grayscale and 32bit RGBA in **Device -> Device Property Browser -> IDSCam - PixelType**
+- Multi-camera support. One can switch between cameras using the dropdown in **Device -> Device Property Browser -> IDSCam-CameraID**. The actual ID is an arbitrary zero-indexed identifier. To know which camera is actually open, you can check the **IDSCam-Serial Number** and/or **IDSCam-CameraName**, and compare them to the model and serialnumber of the cameras. Note that switching cameras does not automatically switch settings.
+
 ## Known limitations
 - **The maximum framerate of the 32bit RBGA pixel format is much lower than advertized or with IDS Peak Cockpit.**
-  - This is indeed true, the problem is that the camera doesn't support recording BGRA8, which is the only accepted color format of Micro-Manager. Hence, the image has to be recorded in a different pixel format (in this case Bayer RG8) and then converted to BGRA8 on the fly. The maximum obtainable framerate then depends heavily on the (single core) processing speed of your PC. A potential solution is to not do the conversion (just pass the raw bayer data) and perform the debayering after all data is collected.
+  - This is indeed true, the problem is that the camera doesn't support recording BGRA8, which is the only accepted color format of Micro-Manager. Hence, the image has to be recorded in a different pixel format (in this case Bayer RG8) and then converted to BGRA8 on the fly. The maximum obtainable framerate then depends heavily on the (single core) processing speed of your PC. A potential solution is to not do the conversion (just pass the raw bayer data) and perform the debayering after all data is collected. However his methods is not yet implemented.
 - **The minimum interval during the Multi-Dimensional Acquisition (MDA) is approximately 200 ms, even at low exposure times (e.g. 10 ms)**
   - This is a limitation of how MDA events are processed. When the interval is set to less than the exposure time, it will record at the maximum framerate possible ~1/exposureTime. Otherwise it will perform something like a timelapse, where it will start the process of acquiring an image after the interval has passed. Sadly the second process has a lot of overhead, which leads to a maximum framerate of ~5 fps. We're currently thinking of ways to fix this.
-- **Changing a value (such as the exposure time) should change another value in the Device Property Browser (like the maximum framerate), but it doesn't update.**
-  - The Device Property Browser only updates when it is opened, try closing and re-opening the Device Property Browser.
+- **When switching to a cameras, some settings are reset, while others are kept**
+  - Currently, when switching cameras, the device adapter asks the new camera for its current settings and adapts displayed settings accordingly. Some settings are kept from session to session (typically PixelType, exposureTime and frameRate), while most others are not. If this heavily inhibits the work of others, we could work on a solution where all settings are kept whithin each session, and/or maybe load settings from a config-file.
+- **When MM is open, I can't open any IDS camera in another software (e.g. IDS Peak Cockpit)**
+  - Currently, when MM is started, it opens all cameras and keeps them open untill MM is closed. This allows quicker switching between cameras. But this means that none of the other softwares can communicate with any of the connected IDS cameras (even when they are seemingly not in use by MM).
 
 ## Future features
+- Rembering last settings of each camera instance
 - More support for other pixel types (10/12 bit grayscale/color)
 - Recording Bayer / Packed images in RAW format (to post-process afterwards)
 - Give more meaningful error messages
 - Improve range of framerates during MDA.
 
-Other suggestions are more than welcome, either create a github issue or send an email to lars.kool@espci.fr
+Note that these are just ideas, no promises are made that these will be implemented in a timely manner (or at all). Other suggestions are more than welcome, either create a github issue or send an email to lars.kool@espci.fr
 
 ## Acknowledgements
 This Device Adapter was developed by Lars Kool at Institut Pierre-Gilles de Gennes (Paris, France).
