@@ -5,14 +5,15 @@
 //-----------------------------------------------------------------------------
 // DESCRIPTION:   Driver for IDS peak series of USB cameras
 //
-//                Based on IDS peak SDK comfort API (version 2.5) and Micromanager DemoCamera example
+//                Based on IDS peak SDK and Micromanager DemoCamera example
+//                tested with SDK version 2.5
 //                Requires Micro-manager Device API 71 or higher!
 //                
 // AUTHOR:        Lars Kool, Institut Pierre-Gilles de Gennes
 //
 // YEAR:          2023
 //                
-// VERSION:       1.0
+// VERSION:       1.1
 //
 // LICENSE:       This file is distributed under the BSD license.
 //                License text is included with the source distribution.
@@ -25,7 +26,7 @@
 //                CONTRIBUTORS BE   LIABLE FOR ANY DIRECT, INDIRECT,
 //                INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES.
 //
-//LAST UPDATE:    25.09.2023 LK
+//LAST UPDATE:    09.10.2023 LK
 
 #ifndef _IDSPeak_H_
 #define _IDSPeak_H_
@@ -38,7 +39,6 @@
 #include <algorithm>
 #include <stdint.h>
 #include <future>
-#include <cmath>
 
 #include <ids_peak_comfort_c/ids_peak_comfort_c.h>
 
@@ -69,25 +69,6 @@ using namespace std;
 
 const char* NoHubError = "Parent Hub not defined.";
 
-// Defines which segments in a seven-segment display are lit up for each of
-// the numbers 0-9. Segments are:
-//
-//  0       1
-// 1 2     2 4
-//  3       8
-// 4 5    16 32
-//  6      64
-const int SEVEN_SEGMENT_RULES[] = { 1 + 2 + 4 + 16 + 32 + 64, 4 + 32, 1 + 4 + 8 + 16 + 64,
-      1 + 4 + 8 + 32 + 64, 2 + 4 + 8 + 32, 1 + 2 + 8 + 32 + 64, 2 + 8 + 16 + 32 + 64, 1 + 4 + 32,
-      1 + 2 + 4 + 8 + 16 + 32 + 64, 1 + 2 + 4 + 8 + 32 + 64 };
-// Indicates if the segment is horizontal or vertical.
-const int SEVEN_SEGMENT_HORIZONTALITY[] = { 1, 0, 0, 1, 0, 0, 1 };
-// X offset for this segment.
-const int SEVEN_SEGMENT_X_OFFSET[] = { 0, 0, 1, 0, 0, 1, 0 };
-// Y offset for this segment.
-const int SEVEN_SEGMENT_Y_OFFSET[] = { 0, 0, 0, 1, 1, 1, 2 };
-
-
 //////////////////////////////////////////////////////////////////////////////
 // CIDSPeak class
 //////////////////////////////////////////////////////////////////////////////
@@ -105,9 +86,11 @@ public:
     int Initialize();
     int Shutdown();
 
+    vector<peak_camera_handle> hCams;
     peak_camera_handle hCam = PEAK_INVALID_HANDLE;
     peak_status status = PEAK_STATUS_SUCCESS;
     void GetName(char* name) const;
+    int CamID_;
 
     // MMCamera API
     // ------------
@@ -156,9 +139,13 @@ public:
 
     // action interface
     // ----------------
+    int OnChangeCamera(MM::PropertyBase* pProp, MM::ActionType eAct);
+    int OnModelName(MM::PropertyBase* pProp, MM::ActionType eAct);
+    int OnSerialNumber(MM::PropertyBase* pProp, MM::ActionType eAct);
     int OnMaxExposure(MM::PropertyBase* pProp, MM::ActionType eAct);
     int OnBinning(MM::PropertyBase* pProp, MM::ActionType eAct);
     int OnPixelType(MM::PropertyBase* pProp, MM::ActionType eAct);
+    int OnFrameRate(MM::PropertyBase* pProp, MM::ActionType eAct);
     int OnReadoutTime(MM::PropertyBase* pProp, MM::ActionType eAct);
     int OnCameraCCDXSize(MM::PropertyBase*, MM::ActionType);
     int OnCameraCCDYSize(MM::PropertyBase*, MM::ActionType);
@@ -185,10 +172,11 @@ public:
     peak_status getGFAfloat(const char* featureName, double* floatValue);
     peak_status getTemperature(double* sensorTemp);
     void initializeAutoWBConversion();
-    peak_status getPixelTypes(vector<string>& pixelTypeValues);
     int transferBuffer(peak_frame_handle hFrame, ImgBuffer& img);
     int updateAutoWhiteBalance();
-    int framerateSet(double interval_ms);
+    int framerateSet(double framerate);
+    int cameraChanged();
+    bool isColorCamera();
 
 
 private:
@@ -198,6 +186,9 @@ private:
 
     static const double nominalPixelSizeUm_;
 
+    string modelName_;
+    string serialNum_;
+    size_t nCameras_;
     double exposureMin_;
     double exposureMax_;
     double exposureInc_;
@@ -211,6 +202,7 @@ private:
     bool initialized_;
     double readoutUs_;
     MM::MMTime readoutStartTime_;
+    string pixelType_;
     int bitDepth_;
     int significantBitDepth_;
     int nComponents_;
@@ -234,8 +226,8 @@ private:
     std::string triggerDevice_;
     map<int, string> peakTypeToString;
     map<string, int> stringToPeakType;
-    peak_auto_feature_mode peakAutoWhiteBalance_;
 
+    peak_auto_feature_mode peakAutoWhiteBalance_;
     map<int, string> peakAutoToString;
     map<string, int> stringToPeakAuto;
     double gainMaster_;

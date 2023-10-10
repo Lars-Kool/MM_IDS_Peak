@@ -1,18 +1,19 @@
 ///////////////////////////////////////////////////////////////////////////////
-// FILE:          IDSPeak.h
+// FILE:          IDSPeak.cpp
 // PROJECT:       Micro-Manager
 // SUBSYSTEM:     DeviceAdapters
 //-----------------------------------------------------------------------------
 // DESCRIPTION:   Driver for IDS peak series of USB cameras
 //
-//                Based on IDS peak SDK comfort API (version 2.5) and Micromanager DemoCamera example
+//                Based on IDS peak SDK and Micro-manager DemoCamera example
+//                tested with SDK version 2.5
 //                Requires Micro-manager Device API 71 or higher!
 //                
 // AUTHOR:        Lars Kool, Institut Pierre-Gilles de Gennes
 //
 // YEAR:          2023
 //                
-// VERSION:       1.0
+// VERSION:       1.1
 //
 // LICENSE:       This file is distributed under the BSD license.
 //                License text is included with the source distribution.
@@ -22,12 +23,11 @@
 //                of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 //
 //                IN NO EVENT SHALL THE COPYRIGHT OWNER OR
-//                CONTRIBUTORS BE   LIABLE FOR ANY DIRECT, INDIRECT,
+//                CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
 //                INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES.
 //
-//LAST UPDATE:    25.09.2023 LK
+//LAST UPDATE:    09.10.2023 LK
 
-#include <time.h>
 #include "IDSPeak.h"
 #include <cstdio>
 #include <string>
@@ -39,8 +39,6 @@
 #include <iostream>
 #include <future>
 
-
-
 using namespace std;
 const double CIDSPeak::nominalPixelSizeUm_ = 1.0;
 double g_IntensityFactor_ = 1.0;
@@ -49,7 +47,7 @@ const char* g_PixelType_32bitRGBA = "32bit RGBA";
 
 // External names used used by the rest of the system
 // to load particular device from the "IDSPeak.dll" library
-const char* g_CameraDeviceName = "DCam";
+const char* g_CameraDeviceName = "IDSCam";
 
 ///////////////////////////////////////////////////////////////////////////////
 // Exported MMDevice API
@@ -201,19 +199,35 @@ int CIDSPeak::Initialize()
     // get the camera list
     status = peak_CameraList_Get(cameraList, &cameraListLength);
     if (status != PEAK_STATUS_SUCCESS) { return ERR_CAMERA_NOT_FOUND; }
-
-    // TODO: Let user pick camera, if multiple are available
-    // select a camera to open
-    size_t selectedCamera = 0;
-
-    // open the selected camera
-    status = peak_Camera_Open(cameraList[selectedCamera].cameraID, &hCam);
-    if (status != PEAK_STATUS_SUCCESS) { return ERR_CAMERA_NOT_FOUND; }
-
+    
+    // Open the cameras and assign cameraIDs
+    vector<string> cameraIndices;
+    CPropertyAction* pAct = new CPropertyAction(this, &CIDSPeak::OnChangeCamera);
+    int nRet = CreateStringProperty(MM::g_Keyword_CameraID, "0", false, pAct);
+    for (int i = 0; i < cameraListLength; i++)
+    {
+        if (peak_Camera_GetAccessStatus(cameraList[i].cameraID) == PEAK_ACCESS_READWRITE)
+        {
+            hCams.push_back(PEAK_INVALID_HANDLE);
+            status = peak_Camera_Open(cameraList[i].cameraID, &hCams[i]);
+            if (status == PEAK_STATUS_SUCCESS)
+            {
+                cameraIndices.push_back(CDeviceUtils::ConvertToString(i));
+            }
+        }
+    }
     // free the camera list, not needed any longer
     free(cameraList);
-
-    // check, which camera was actually opened
+    if (cameraIndices.size() == 0) { return ERR_CAMERA_NOT_FOUND; }
+    
+    CamID_ = stoi(cameraIndices[0]);
+    
+    nRet = SetAllowedValues(MM::g_Keyword_CameraID, cameraIndices);
+    nCameras_ = cameraIndices.size();
+    nRet = CreateIntegerProperty("nCameras", (long)nCameras_, true);
+    hCam = hCams[CamID_];
+    
+    // check which camera was actually opened
     peak_camera_descriptor cameraInfo;
     status = peak_Camera_GetDescriptor(peak_Camera_ID_FromHandle(hCam), &cameraInfo);
     if (status != PEAK_STATUS_SUCCESS) { return ERR_CAMERA_NOT_FOUND; }
@@ -222,7 +236,7 @@ int CIDSPeak::Initialize()
     // -----------------
 
     // Name
-    int nRet = CreateStringProperty(MM::g_Keyword_Name, g_CameraDeviceName, true);
+    nRet = CreateStringProperty(MM::g_Keyword_Name, g_CameraDeviceName, true);
     assert(nRet == DEVICE_OK);
 
     // Description
@@ -230,58 +244,34 @@ int CIDSPeak::Initialize()
     assert(nRet == DEVICE_OK);
 
     // CameraName
-    nRet = CreateStringProperty(MM::g_Keyword_CameraName, cameraInfo.modelName, true);
+    modelName_ = cameraInfo.modelName;
+    pAct = new CPropertyAction(this, &CIDSPeak::OnModelName);
+    nRet = CreateStringProperty(MM::g_Keyword_CameraName, "model name placeholder", true, pAct);
     assert(nRet == DEVICE_OK);
 
-    // CameraID
-    char CamID[MM::MaxStrLength];
-    _ui64toa_s(cameraInfo.cameraID, CamID, sizeof(CamID), 10);
-    nRet = CreateStringProperty(MM::g_Keyword_CameraID, CamID, true);
+    // SerialNumber
+    serialNum_ = cameraInfo.serialNumber;
+    pAct = new CPropertyAction(this, &CIDSPeak::OnSerialNumber);
+    nRet = CreateStringProperty("Serial Number", "serial number placeholder", true, pAct);
     assert(nRet == DEVICE_OK);
-    //free(CamID);
 
     // binning
-    CPropertyAction* pAct = new CPropertyAction(this, &CIDSPeak::OnBinning);
-    nRet = CreateIntegerProperty(MM::g_Keyword_Binning, 1, false, pAct);
+    pAct = new CPropertyAction(this, &CIDSPeak::OnBinning);
+    nRet = CreateIntegerProperty(MM::g_Keyword_Binning, 0, false, pAct);
     assert(nRet == DEVICE_OK);
-    nRet = SetAllowedBinning();
-    if (nRet != DEVICE_OK)
-        return nRet;
 
     // pixel type
-    status = peak_PixelFormat_Set(hCam, PEAK_PIXEL_FORMAT_MONO8);
     pAct = new CPropertyAction(this, &CIDSPeak::OnPixelType);
-    nRet = CreateStringProperty(MM::g_Keyword_PixelType, g_PixelType_8bit, false, pAct);
+    nRet = CreateStringProperty(MM::g_Keyword_PixelType, "pixeltype placeholder", false, pAct);
     assert(nRet == DEVICE_OK);
 
-    vector<string> pixelTypeValues;
-    pixelTypeValues.push_back(g_PixelType_8bit);
-    pixelTypeValues.push_back(g_PixelType_32bitRGBA);
-
-    nRet = SetAllowedValues(MM::g_Keyword_PixelType, pixelTypeValues);
-    if (nRet != DEVICE_OK)
-        return nRet;
-
-    // Exposure time, get range from camera (in us) and convert to ms
-    double exposureTemp;
-    status = peak_ExposureTime_Get(hCam, &exposureTemp);
-    exposureCur_ = exposureTemp / 1000;
+    // Exposure time
     nRet = CreateFloatProperty(MM::g_Keyword_Exposure, exposureCur_, false);
     assert(nRet == DEVICE_OK);
-    status = peak_ExposureTime_GetRange(hCam, &exposureMin_, &exposureMax_, &exposureInc_);
-    if (status != PEAK_STATUS_SUCCESS) { return ERR_DEVICE_NOT_AVAILABLE; }
-    exposureMin_ /= 1000;
-    exposureMax_ /= 1000;
-    exposureInc_ /= 1000;
-    nRet = SetPropertyLimits(MM::g_Keyword_Exposure, exposureMin_, exposureMax_);
-    if (nRet != DEVICE_OK)
-        return nRet;
 
     // Frame rate
-    status = peak_FrameRate_GetRange(hCam, &framerateMin_, &framerateMax_, &framerateInc_);
-    nRet = CreateFloatProperty("Maximum framerate", framerateMax_, false);
-    assert(nRet == DEVICE_OK);
-    nRet = CreateFloatProperty("Minimum framerate", framerateMin_, false);
+    pAct = new CPropertyAction(this, &CIDSPeak::OnFrameRate);
+    nRet = CreateFloatProperty("MDA framerate", 1, false, pAct);
     assert(nRet == DEVICE_OK);
 
     // Auto white balance
@@ -350,27 +340,12 @@ int CIDSPeak::Initialize()
     // CCD size of the camera we are modeling
     // getSensorInfo needs to be called before the CreateIntegerProperty
     // calls, othewise the default (512) values will be displayed.
-    nRet = getSensorInfo();
     pAct = new CPropertyAction(this, &CIDSPeak::OnCameraCCDXSize);
     nRet = CreateIntegerProperty("OnCameraCCDXSize", 512, true, pAct);
     assert(nRet == DEVICE_OK);
     pAct = new CPropertyAction(this, &CIDSPeak::OnCameraCCDYSize);
     nRet = CreateIntegerProperty("OnCameraCCDYSize", 512, true, pAct);
     assert(nRet == DEVICE_OK);
-
-    // Obtain ROI properties
-    // The SetROI function used the CCD size, so this function should
-    // always be put after the getSensorInfo call
-    // It is assumed that the maximum ROI size is the size of the CCD
-    // and that the increment in X and Y are identical
-    peak_size roi_size_min;
-    peak_size roi_size_max;
-    peak_size roi_size_inc;
-    status = peak_ROI_Size_GetRange(hCam, &roi_size_min, &roi_size_max, &roi_size_inc);
-    if (status != PEAK_STATUS_SUCCESS) { return DEVICE_ERR; }
-    roiMinSizeX_ = roi_size_min.width;
-    roiMinSizeY_ = roi_size_min.height;
-    roiInc_ = roi_size_inc.height;
 
     // Trigger device
     pAct = new CPropertyAction(this, &CIDSPeak::OnTriggerDevice);
@@ -401,25 +376,16 @@ int CIDSPeak::Initialize()
     nRet = AddAllowedValue(propName.c_str(), "No");
     assert(nRet == DEVICE_OK);
 
-    // synchronize all properties
-    // --------------------------
-    nRet = UpdateStatus();
-    if (nRet != DEVICE_OK)
-        return nRet;
-    
-    // Debug framerate recording
-    nRet = CreateFloatProperty("Interval", 0, false);
-    assert(nRet == DEVICE_OK);
-
     // initialize image buffer
     GenerateEmptyImage(img_);
 
-    // setup the buffer
-    // This will set the buffer to the CCD size, not the ROI size,
-    // hence the ROI needs to be cleared first.
-    nRet = ClearROI();
-    assert(nRet == DEVICE_OK);
-    nRet = ResizeImageBuffer();
+    // initialize first camera
+    nRet = cameraChanged();
+    if (nRet != DEVICE_OK) { return nRet; }
+
+    // synchronize all properties
+    // --------------------------
+    nRet = UpdateStatus();
     if (nRet != DEVICE_OK)
         return nRet;
 
@@ -438,7 +404,9 @@ int CIDSPeak::Initialize()
 int CIDSPeak::Shutdown()
 {
     // Close open camera and set pointer to NULL
-    (void)peak_Camera_Close(hCam);
+    for (size_t i = 0; i < nCameras_; i++)
+        peak_Camera_Close(hCams[i]);
+    nCameras_ = 0;
     hCam = NULL;
 
     // Close peak library
@@ -467,7 +435,10 @@ int CIDSPeak::SnapImage()
     unsigned int pendingFrames = framesToAcquire;
     unsigned int timeoutCount = 0;
 
-    nRet = framerateSet(exposureCur_);
+    // Make SnapImage responsive, even if low framerate has been set
+    double framerateTemp = framerateCur_;
+    nRet = framerateSet(1000 / exposureCur_);
+
     uint32_t three_frame_times_timeout_ms = (uint32_t)((3000.0 / framerateCur_) + 0.5);
 
     status = peak_Acquisition_Start(hCam, framesToAcquire);
@@ -495,6 +466,8 @@ int CIDSPeak::SnapImage()
         pendingFrames--;
     }
     readoutStartTime_ = GetCurrentMMTime();
+    // Revert framerate back to framerate before snapshot
+    nRet = framerateSet(framerateTemp);
     return nRet;
 }
 
@@ -579,7 +552,7 @@ long CIDSPeak::GetImageBufferSize() const
 */
 int CIDSPeak::SetROI(unsigned x, unsigned y, unsigned xSize, unsigned ySize)
 {
-    int ret = DEVICE_OK;
+    int nRet = DEVICE_OK;
     if (peak_ROI_GetAccessStatus(hCam) == PEAK_ACCESS_READWRITE)
     {
         multiROIXs_.clear();
@@ -589,7 +562,7 @@ int CIDSPeak::SetROI(unsigned x, unsigned y, unsigned xSize, unsigned ySize)
         if (xSize == 0 && ySize == 0)
         {
             // effectively clear ROI
-            int nRet = ResizeImageBuffer();
+            nRet = ResizeImageBuffer();
             if (nRet != DEVICE_OK) { return nRet; }
             roiX_ = 0;
             roiY_ = 0;
@@ -598,9 +571,12 @@ int CIDSPeak::SetROI(unsigned x, unsigned y, unsigned xSize, unsigned ySize)
         }
         else
         {
-            // If ROI is small than the minimum required size, set size to minimum
+            // If ROI is smaller than the minimum required size, set size to minimum
             if (xSize < roiMinSizeX_) { xSize = roiMinSizeX_; }
             if (ySize < roiMinSizeY_) { ySize = roiMinSizeY_; }
+            // If ROI is larger than the CCD, set size to CCD size
+            if (xSize > (unsigned int)cameraCCDXSize_) { xSize = cameraCCDXSize_; }
+            if (ySize > (unsigned int)cameraCCDYSize_) { ySize = cameraCCDYSize_; }
             // If ROI is not multiple of increment, reduce ROI such that it is
             xSize -= xSize % roiInc_;
             ySize -= ySize % roiInc_;
@@ -621,7 +597,7 @@ int CIDSPeak::SetROI(unsigned x, unsigned y, unsigned xSize, unsigned ySize)
         status = peak_ROI_Set(hCam, roi);
     }
     else { return DEVICE_CAN_NOT_SET_PROPERTY; }
-    return ret;
+    return nRet;
 }
 
 /**
@@ -828,9 +804,14 @@ void CIDSPeak::SetExposure(double exp)
         {
             status = peak_ExposureTime_Set(hCam, exposureSet);
         }
+        // Update framerate range
+        status = peak_FrameRate_GetRange(hCam, &framerateMin_, &framerateMax_, &framerateInc_);
+        SetPropertyLimits("MDA framerate", framerateMin_, framerateMax_);
+
         // Set displayed exposure time
         status = peak_ExposureTime_Get(hCam, &exposureCur_);
-        SetProperty(MM::g_Keyword_Exposure, CDeviceUtils::ConvertToString(exposureCur_ / 1000));
+        exposureCur_ /= 1000;
+        SetProperty(MM::g_Keyword_Exposure, CDeviceUtils::ConvertToString(exposureCur_));
         GetCoreCallback()->OnExposureChanged(this, exp);
     }
 }
@@ -853,21 +834,12 @@ int CIDSPeak::GetBinning() const
 */
 int CIDSPeak::SetBinning(int binF)
 {
-    if (peak_Binning_GetAccessStatus(hCam) == PEAK_ACCESS_READWRITE)
-    {
-        // Update binning
-        status = peak_Binning_Set(hCam, (uint32_t)binF, (uint32_t)binF);
-        if (status != PEAK_STATUS_SUCCESS) { return DEVICE_ERR; }
-        binSize_ = binF;
-        int ret = SetProperty(MM::g_Keyword_Binning, CDeviceUtils::ConvertToString(binF));
-
-        // Update framerate range (since binning affects the maximum framerate)
-        status = peak_FrameRate_GetRange(hCam, &framerateMin_, &framerateMax_, &framerateInc_);
-        ret = SetProperty("Maximum framerate", CDeviceUtils::ConvertToString(framerateMax_));
-        ret = SetProperty("Minimum framerate", CDeviceUtils::ConvertToString(framerateMin_));
-        return ret;
-    }
-    else { return ERR_NO_WRITE_ACCESS; }
+    // Update binning
+    status = peak_Binning_Set(hCam, (uint32_t)binF, (uint32_t)binF);
+    if (status != PEAK_STATUS_SUCCESS) { return DEVICE_ERR; }
+    binSize_ = binF;
+    int nRet = SetProperty(MM::g_Keyword_Binning, CDeviceUtils::ConvertToString(binF));
+    return nRet;
 }
 
 int CIDSPeak::IsExposureSequenceable(bool& isSequenceable) const
@@ -945,7 +917,8 @@ int CIDSPeak::SendExposureSequence() const {
 
 int CIDSPeak::SetAllowedBinning()
 {
-    if (peak_Binning_GetAccessStatus(hCam) == PEAK_ACCESS_READONLY || peak_Binning_GetAccessStatus(hCam) == PEAK_ACCESS_READWRITE)
+    int nRet = DEVICE_OK;
+    if (peak_Binning_GetAccessStatus(hCam) == PEAK_ACCESS_READWRITE)
     {
         // Get the binning factors, uses two staged data query (first get length of list, then get list)
         size_t binningFactorCount;
@@ -955,16 +928,28 @@ int CIDSPeak::SetAllowedBinning()
         status = peak_Binning_FactorY_GetList(hCam, binningFactorList, &binningFactorCount);
         if (status != PEAK_STATUS_SUCCESS) { return DEVICE_ERR; }
 
+        bool curr_bin_invalid = true;
         vector<string> binValues;
         for (size_t i = 0; i < binningFactorCount; i++)
         {
+            if (binningFactorList[i] == (uint32_t)binSize_) { curr_bin_invalid = false; }
+            
             binValues.push_back(to_string(binningFactorList[i]));
         }
-        LogMessage("Setting Allowed Binning settings", true);
-        free(binningFactorList);
-        return SetAllowedValues(MM::g_Keyword_Binning, binValues);
+
+        if (curr_bin_invalid)
+        {
+            nRet = SetBinning(1);
+        }
+        else
+        {
+            nRet = SetBinning(binSize_);
+        }
+        nRet = ClearAllowedValues(MM::g_Keyword_Binning);
+        nRet = SetAllowedValues(MM::g_Keyword_Binning, binValues);
+        return nRet;
     }
-    else { return ERR_NO_READ_ACCESS; }
+    else { return ERR_NO_WRITE_ACCESS; }
 }
 
 
@@ -1005,7 +990,7 @@ int CIDSPeak::StartSequenceAcquisition(long numImages, double interval_ms, bool 
     int nRet = DEVICE_OK;
 
     // Adjust framerate to match requested interval between frames
-    nRet = framerateSet(interval_ms);
+    nRet = framerateSet(1000 / interval_ms);
 
     // Wait until shutter is ready
     nRet = GetCoreCallback()->PrepareForAcq(this);
@@ -1243,7 +1228,7 @@ int CIDSPeak::OnMaxExposure(MM::PropertyBase* pProp, MM::ActionType eAct)
 
         if (peak_ExposureTime_GetAccessStatus(hCam) == PEAK_ACCESS_READWRITE)
         {
-            status = peak_ExposureTime_Set(hCam, exposureMax_);
+            status = peak_ExposureTime_Set(hCam, exposureMax_ * 1000);
             if (status != PEAK_STATUS_SUCCESS) { return DEVICE_ERR; } // Should not be possible
             status = peak_ExposureTime_Get(hCam, &exposureCur_);
             if (status != PEAK_STATUS_SUCCESS) { return DEVICE_ERR; } // Should not be possible
@@ -1307,6 +1292,21 @@ int CIDSPeak::OnBinning(MM::PropertyBase* pProp, MM::ActionType eAct)
         break;
     }
     return nRet;
+}
+
+int CIDSPeak::OnFrameRate(MM::PropertyBase* pProp, MM::ActionType eAct)
+{
+    if (eAct == MM::BeforeGet)
+    {
+        pProp->Set(framerateCur_);
+    }
+    else if (eAct == MM::AfterSet)
+    {
+        double framerateTemp;
+        pProp->Get(framerateTemp);
+        framerateSet(framerateTemp);
+    }
+    return DEVICE_OK;
 }
 
 /**
@@ -1643,6 +1643,28 @@ int CIDSPeak::OnCCDTemp(MM::PropertyBase* pProp, MM::ActionType eAct)
     return DEVICE_OK;
 }
 
+int CIDSPeak::OnModelName(MM::PropertyBase* pProp, MM::ActionType eAct)
+{
+    int nRet = DEVICE_OK;
+    // This is a readonly function
+    if (eAct == MM::BeforeGet)
+    {
+        pProp->Set(modelName_.c_str());
+    }
+    return nRet;
+}
+
+int CIDSPeak::OnSerialNumber(MM::PropertyBase* pProp, MM::ActionType eAct)
+{
+    int nRet = DEVICE_OK;
+    // This is a readonly function
+    if (eAct == MM::BeforeGet)
+    {
+        pProp->Set(serialNum_.c_str());
+    }
+    return nRet;
+}
+
 int CIDSPeak::OnIsSequenceable(MM::PropertyBase* pProp, MM::ActionType eAct)
 {
     std::string val = "Yes";
@@ -1665,6 +1687,24 @@ int CIDSPeak::OnIsSequenceable(MM::PropertyBase* pProp, MM::ActionType eAct)
     }
 
     return DEVICE_OK;
+}
+
+int CIDSPeak::OnChangeCamera(MM::PropertyBase* pProp, MM::ActionType eAct)
+{
+    int nRet = DEVICE_OK;
+    if (eAct == MM::BeforeGet)
+    {
+        pProp->Set(CDeviceUtils::ConvertToString(CamID_));
+    }
+    else if (eAct == MM::AfterSet)
+    {
+        string CamID_temp;
+        pProp->Get(CamID_temp);
+        CamID_ = stoi(CamID_temp);
+        hCam = hCams[CamID_];
+        cameraChanged();
+    }
+    return nRet;
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -1864,30 +1904,6 @@ void CIDSPeak::initializeAutoWBConversion()
     stringToPeakAuto.insert(pair<string, int>("Continuous", PEAK_AUTO_FEATURE_MODE_CONTINUOUS));
 }
 
-peak_status CIDSPeak::getPixelTypes(vector<string>& pixelTypeValues)
-{
-    size_t pixelFormatCount = 0;
-    if (peak_PixelFormat_GetAccessStatus(hCam) == PEAK_ACCESS_READWRITE ||
-        peak_PixelFormat_GetAccessStatus(hCam) == PEAK_ACCESS_READONLY)
-    {
-        status = peak_PixelFormat_GetList(hCam, NULL, &pixelFormatCount);
-        peak_pixel_format* pixelFormatList = (peak_pixel_format*)calloc(
-            pixelFormatCount, sizeof(peak_pixel_format));
-        status = peak_PixelFormat_GetList(hCam, pixelFormatList, &pixelFormatCount);
-
-        printf("Available pixel formats: \n");
-        for (size_t i = 0; i < pixelFormatCount; i++)
-        {
-            if (peakTypeToString.find(pixelFormatList[i]) != peakTypeToString.end())
-            {
-                pixelTypeValues.push_back(peakTypeToString[pixelFormatList[i]].c_str());
-            }
-        }
-        free(pixelFormatList);
-    }
-    return status;
-}
-
 int CIDSPeak::transferBuffer(peak_frame_handle hFrame, ImgBuffer& img)
 {
     peak_frame_handle hFrameConverted;
@@ -1950,28 +1966,136 @@ int CIDSPeak::updateAutoWhiteBalance()
     else { return DEVICE_ERR; }
 }
 
-int CIDSPeak::framerateSet(double interval_ms)
+int CIDSPeak::framerateSet(double framerate)
 {
-    int nRet = DEVICE_OK;
-    // Make sure interval is less than exposure time
-    // Half a millisecond buffer to make sure sensor can dump info
-    if (interval_ms < exposureCur_ + 0.5)
-    {
-        interval_ms = exposureCur_ + 0.5;
-    }
-
     // Check if interval doesn't exceed framerate limitations of camera
     // Else set interval to match max framerate
-    if (1000 / interval_ms > framerateMax_)
+    if (framerate > framerateMax_)
     {
-        interval_ms = 1000 / framerateMax_;
+        framerate = framerateMax_;
+    }
+    else if (framerate < framerateMin_)
+    {
+        framerate = framerateMin_;
     }
 
-    status = peak_FrameRate_Set(hCam, 1000 / interval_ms);
-    framerateCur_ = 1000 / interval_ms;
-    if (status != DEVICE_OK)
+    if (peak_FrameRate_GetAccessStatus(hCam) == PEAK_ACCESS_READWRITE)
+    {
+        status = peak_FrameRate_Set(hCam, framerate);
+        framerateCur_ = framerate;
+    }
+    else
     {
         return ERR_NO_WRITE_ACCESS;
     }
+    return DEVICE_OK;
+}
+
+// Actual initialization of the camera (is called every time camera is swapped).
+int CIDSPeak::cameraChanged()
+{
+    int nRet = DEVICE_OK;
+    peak_camera_descriptor cameraInfo;
+    status = peak_Camera_GetDescriptor(peak_Camera_ID_FromHandle(hCam), &cameraInfo);
+    if (status != PEAK_STATUS_SUCCESS) { return ERR_CAMERA_NOT_FOUND; }
+
+    // CameraName
+    modelName_ = cameraInfo.modelName;
+
+    // CameraID
+    serialNum_ = cameraInfo.serialNumber;
+
+    // Binning
+    nRet = SetAllowedBinning();
+    if (nRet != DEVICE_OK)
+        return nRet;
+    uint32_t binx;
+    uint32_t biny;
+    status = peak_Binning_Get(hCam, &binx, &biny);
+    binSize_ = (long)binx;
+    nRet = SetBinning(binSize_);
+
+    // PixelType, assumes 8bit mono is always possible
+    vector<string> pixelTypeValues;
+    pixelTypeValues.push_back(g_PixelType_8bit);
+    if (isColorCamera())
+    {
+        pixelTypeValues.push_back(g_PixelType_32bitRGBA);
+    }
+    nRet = ClearAllowedValues(MM::g_Keyword_PixelType);
+    nRet = SetAllowedValues(MM::g_Keyword_PixelType, pixelTypeValues);
+    if (nRet != DEVICE_OK)
+        return nRet;
+
+    peak_pixel_format format;
+    status = peak_PixelFormat_Get(hCam, &format);
+    if (format == PEAK_PIXEL_FORMAT_MONO8)
+    {
+        pixelType_ = g_PixelType_8bit;
+        nComponents_ = 1;
+        SetProperty(MM::g_Keyword_PixelType, g_PixelType_8bit);
+    }
+    else
+    {
+        pixelType_ = g_PixelType_32bitRGBA;
+        nComponents_ = 8;
+        SetProperty(MM::g_Keyword_PixelType, g_PixelType_32bitRGBA);
+    }
+
+    // Exposure time
+    status = peak_ExposureTime_GetRange(hCam, &exposureMin_, &exposureMax_, &exposureInc_);
+    if (status != PEAK_STATUS_SUCCESS) { return ERR_DEVICE_NOT_AVAILABLE; }
+    exposureMin_ /= 1000;
+    exposureMax_ /= 1000;
+    exposureInc_ /= 1000;
+    nRet = SetPropertyLimits(MM::g_Keyword_Exposure, exposureMin_, exposureMax_);
+    if (nRet != DEVICE_OK)
+        return nRet;
+    status = peak_ExposureTime_Get(hCam, &exposureCur_);
+    exposureCur_ /= 1000;
+
+    // Framerate range
+    status = peak_FrameRate_GetRange(hCam, &framerateMin_, &framerateMax_, &framerateInc_);
+    nRet = SetPropertyLimits("MDA framerate", framerateMin_, framerateMax_);
+    status = peak_FrameRate_Get(hCam, &framerateCur_);
+
+    // Get sensor size
+    nRet = getSensorInfo();
+
+    // Obtain ROI properties
+    // The SetROI function used the CCD size, so this function should
+    // always be put after the getSensorInfo call
+    // It is assumed that the maximum ROI size is the size of the CCD
+    // and that the increment in X and Y are identical
+    peak_size roi_size_min;
+    peak_size roi_size_max;
+    peak_size roi_size_inc;
+    peak_roi roi;
+    status = peak_ROI_Size_GetRange(hCam, &roi_size_min, &roi_size_max, &roi_size_inc);
+    if (status != PEAK_STATUS_SUCCESS) { return DEVICE_ERR; }
+    roiMinSizeX_ = roi_size_min.width;
+    roiMinSizeY_ = roi_size_min.height;
+    roiInc_ = roi_size_inc.height;
+    status = peak_ROI_Get(hCam, &roi);
+    SetROI(roi.offset.x, roi.offset.y, roi.size.width, roi.size.height);
+    img_.Resize(roi.size.width, roi.size.height, nComponents_ * (bitDepth_ / 8));
+
+    if (nRet != DEVICE_OK)
+        return nRet;
     return nRet;
+}
+
+// Checks if camera supportes color image formats
+bool CIDSPeak::isColorCamera()
+{
+    size_t pixelFormatCount = 0;
+    status = peak_PixelFormat_GetList(hCam, NULL, &pixelFormatCount);
+    peak_pixel_format* pixelFormatList = (peak_pixel_format*)calloc(
+        pixelFormatCount, sizeof(peak_pixel_format));
+    status = peak_PixelFormat_GetList(hCam, pixelFormatList, &pixelFormatCount);
+    for (int i = 0; i < pixelFormatCount; i++)
+    {
+        if (pixelFormatList[i] == PEAK_PIXEL_FORMAT_BAYER_RG8) { return true; }
+    }
+    return false;
 }

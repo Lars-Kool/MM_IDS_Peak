@@ -7,10 +7,9 @@ This GitHub repository contains a Device Adapter for IDS cameras. It contains bo
 The following steps will guide you through the process of "installing" the .dll, allowing you to use IDS cameras with Micro-Manager.
 1. Clone/download this repository.
 2. Download and install "IDS Peak" from the IDS website https://en.ids-imaging.com/downloads.html
-3. Install Microsoft Studio 2019 Community edition with "Desktop development with C++" workload (https://my.visualstudio.com/Downloads?q=visual%20studio%202019&wt.mc_id=o~msft~vscom~older-downloads)
-4. Copy the "mmgr_dal_IDSPeak.dll" into the root folder of Micro-Manager (e.g. "C:\Program Files\Micro-Manager-2.0")
-5. Copy all .dll and .lib files from the IDS Peak software into the root folder of Micro-Manager. The .dll and .lib files can be found in ".\PATH_TO_INSTALL\IDS\ids_peak\comfort_sdk\api\lib\x86_64" (.\PATH_TO_INSTALL is the folder you installed IDS Peak, e.g. "C:\Program Files").
-6. Start Micro-Manager and either walk through the Hardware configuration wizard, or load the .cfg file included in this repository. Make sure the camera is plugged into a USB3 port before launching Micro-Manager.
+3. Copy the "mmgr_dal_IDSPeak.dll" into the root folder of Micro-Manager (e.g. "C:\Program Files\Micro-Manager-2.0")
+4. Copy all .dll and .lib files from the IDS Peak software into the root folder of Micro-Manager. The .dll and .lib files can be found in ".\PATH_TO_INSTALL\IDS\ids_peak\comfort_sdk\api\lib\x86_64" (.\PATH_TO_INSTALL is the folder you installed IDS Peak, e.g. "C:\Program Files").
+5. Start Micro-Manager and either walk through the Hardware configuration wizard, or load the .cfg file included in this repository. Make sure the camera is plugged into a USB3 port before launching Micro-Manager.
 
 ## Building the device adapter yourself
 More advanced users could build the device adapter themselves, allowing them to tailor the device adapter to their needs. If you just plan to use the default device adapter, there is no benefit to building it yourself. Below you will find a brief walkthrough on building the device adapter.
@@ -22,6 +21,7 @@ More advanced users could build the device adapter themselves, allowing them to 
 6. Right-click the **Project**, and click **Build**. The .dll will now be build, and should finish without any warnings/errors.
 7. The .dll file can now be found in ".\micro-manager\mmCoreAndDevices\build\Debug\x64".
 8. Now you have compiled the .dll, follow the steps under "Using the precompiled .dll" to enable Micro-Manager to communicate with IDS cameras.
+9. If you want to use the .dll on a PC other than the one used to build the .dll, it is best to set the Solution Configuration to "Release" (that way the other PC doesn't require an install of Microsoft Visual Studio 2019). The .dll can than be found in ".\micro-manager\mmCoreAndDevices\build\Release\x64".
 
 ## Features
 - Imaging in grayscale and 32bit RGBA. One can switch between 8bit grayscale and 32bit RGBA in **Device -> Device Property Browser -> IDSCam - PixelType**
