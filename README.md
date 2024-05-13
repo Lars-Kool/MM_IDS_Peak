@@ -1,4 +1,8 @@
 # Micro-Manager Device Adapter for IDS Peak cameras
+
+## This repository only exists to keep the image.sc forum link alive. This project is transferred to https://github.com/micro-manager/mmCoreAndDevices/tree/main/DeviceAdapters/IDSPeak
+
+
 Micro-Manager is an application to control microscope hardware, such as cameras. It includes a hardware abstraction layer written in C++ and a user interface written in Java. Micro-Manager needs a translation layer between the driver (written by the manufacturer) and Micro-Manager's C++ backend. This translation layer is called a "Device Adapter" (Micro-Manager has chosen not to call it a "Driver" to distinguish it from the libraries provided by the manufacturers of the devices).
 
 This GitHub repository contains a Device Adapter for IDS cameras. It contains both the already built .dll (mmgr_dal_IDSPeak.dll) and the C++/h files to build it yourself. Instructions can be found below. The Device Adapter was tested with an IDS USB3-3040CP-HQ Rev 2.2 on Windows 10, and not with any other camera or operating system. Although camera model should not matter, there might be assumed default settings that might not be universally present. A different operating system could be more problematic. 
